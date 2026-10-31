@@ -1,4 +1,4 @@
-# Horizon's design system
+# Morizen's design system
 
 One design language for the launcher, the website and the few overlays the game draws that
 vanilla has no screen for (the on-screen keyboard a controller types with). Every game screen
@@ -22,8 +22,9 @@ almost nothing but type. What we take from it is its restraint rather than its c
 2. **Lists, not cards.** Content is a numbered list: a small mono index on the left (`01`,
    `02`…), the name large, a mono detail on the right, and a 1 px rule between rows. Versions,
    settings, worlds, servers, release notes and the parity table are all this one component.
-3. **One accent, used once.** Neutrals do the work. The violet marks the single main action on a
-   screen (Play, Download), focus, links and progress; selection is shown in ink, not in colour.
+3. **One accent, used once.** Neutrals do the work. The accent — violet in the game's menus, gold in
+   the launcher — marks the single main action on a screen (Play, Download), focus, links and
+   progress; selection is shown in ink, not in colour.
 4. **Space instead of borders.** Generous margins (64 px on wide screens, 16 px on phones), no
    shadows, no gradients, no outlines around groups. A surface tint appears only under the
    pointer or behind something that must stand apart (a console, a dialog).
@@ -36,7 +37,9 @@ almost nothing but type. What we take from it is its restraint rather than its c
 
 ### Colour
 
-Cool, slightly blue neutrals in two appearances with the same restraint, and Horizon's violet.
+Cool, slightly blue neutrals in two appearances with the same restraint, and Morizen's violet: the
+game's menus keep the palette Horizon drew. The launcher and the project site use the warm neutrals and
+gold of [Blocks](#blocks) instead.
 Every text colour passes WCAG AA (4.5:1) on every background it is used on; the tests in
 `horizon-theme` check each pair in both palettes.
 
@@ -118,7 +121,7 @@ Geist (400, 500, 600) and Geist Mono (400), bundled under the SIL Open Font Lice
   written in mono beside the label, not on the track.
 - **Segmented control / tabs**: a `plate_soft` pill; the selected segment is an `ink` pill with
   `page` text that slides over `move`.
-- **Navigation**: text only. Launcher: a top bar with the mark and "Horizon" on the left and
+- **Navigation**: text only. Launcher: a top bar with the mark and "Morizen" on the left and
   the pages on the right, `label` size, `muted`, the current one `ink` on a soft pill. Game
   menus keep their sidebar layout (it suits a controller), but as a plain column of text items
   under the mark, with no panel tint and no border: the current one `ink` on a soft pill that
@@ -150,7 +153,7 @@ Geist (400, 500, 600) and Geist Mono (400), bundled under the SIL Open Font Lice
 
 ## Blocks
 
-A blocky, Minecraft-like look in Horizon's purple, for the website and the redesigned launcher:
+A blocky, Minecraft-like look in Morizen's gold, for the website and the redesigned launcher:
 Minecraft's inventory rather than a document. Its colours are `horizon_theme::Blocks`
 (`BLOCKS_LIGHT`, `BLOCKS_DARK`), which `tokens.css` carries under the same names as before plus
 `--panel`, `--raised`, `--button`, `--well`, `--bevel`, `--lip`, `--outline` and the `--face`
@@ -163,12 +166,12 @@ of the main action. The game's menus keep `LIGHT` and `DARK`.
   weight's cap height, and the Latin I's glyph, so a Russian or Ukrainian heading stays in the
   pixel face.
 - **Blocks, not rounded cards.** Every surface is square: a 2 px dark outline, a 2 px light bevel
-  along the top and a darker lip along the bottom. The main action is the violet face with its own
+  along the top and a darker lip along the bottom. The main action is the gold face with its own
   bevel and a 4 px lip; it sinks a pixel when pressed. Code and fields are sunk wells.
 - **Inventory tabs** switch the kinds in Mods: the open tab joins the panel under it.
 - **Slots** hold pictures: a mod's or pack's own icon and gallery images from its source,
   downloaded when first shown and kept on disk (`launcher/src/browser/images.rs`); the launcher
-  ships no third-party pictures. The Horizon instance shows a grass block drawn from the player's
+  ships no third-party pictures. The default instance shows a grass block drawn from the player's
   own prepared Minecraft textures. Sources are named in text ("from Modrinth"): Modrinth's logo is
   all rights reserved, so it is not shown.
 - **Partner banner**: the one exception to shipping no third-party pictures. Sculk, a server host,

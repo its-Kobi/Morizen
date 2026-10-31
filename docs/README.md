@@ -1,6 +1,9 @@
-# Horizon documentation
+# Morizen documentation
 
-To play, use [the launcher](../launcher/README.md); the project site is [playhorizon.dev](https://playhorizon.dev). These pages are for developers. What is being done now and next, the work board and how to help: [the hub](https://playhorizon.dev/hub) ([ROADMAP.md](../ROADMAP.md), [roadmap/README.md](../roadmap/README.md) for keeping it current).
+These pages describe the engine Morizen is built on — Horizon's Rust rewrite of Minecraft: Java Edition
+26.3 — and are for developers. To play, use [the launcher](../launcher/README.md); the upstream project's
+site is [playhorizon.dev](https://playhorizon.dev). What the engine does now and next is Horizon's plan:
+the [roadmap](../ROADMAP.md) ([roadmap/README.md](../roadmap/README.md) for keeping it current).
 
 ## Build and run
 

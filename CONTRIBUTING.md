@@ -1,21 +1,25 @@
-# Contributing to Horizon
+# Contributing to Morizen
 
-Thanks for helping. Horizon is Minecraft: Java Edition 26.3 rewritten in Rust, and the one rule that shapes
-everything is that **it plays exactly like vanilla**. This page is the short version of how we work; questions are
-welcome on [Discord](https://discord.gg/HcTeMZxe5E).
+Thanks for helping. Morizen is a fork of Horizon, Minecraft: Java Edition 26.3 rewritten in Rust, and the one
+rule that shapes everything is that **it plays exactly like vanilla**. This page is the short version of how
+the work is done; the upstream project's questions are welcome on
+[its Discord](https://discord.gg/HcTeMZxe5E).
 
-This repository holds the game and the launcher, plus the tools, tests and docs that build, check and release them.
-The website (playhorizon.dev) is built in a separate repository from this one's README, `docs/api/` and roadmap. Anything else (videos, Discord and other community material) lives elsewhere.
+This repository holds the game and the launcher, plus the tools, tests and docs that build, check and release
+them. The website (playhorizon.dev) belongs to the upstream project and is built in a separate repository from
+this one's README, `docs/api/` and roadmap. Anything else (videos, Discord and other community material) lives
+elsewhere.
 
-**Where to start: [playhorizon.dev/hub](https://playhorizon.dev/hub).** It shows what is being done now and next
-([ROADMAP.md](ROADMAP.md) in the repository), the work board, good first tasks, and the forms to report a bug or
-suggest something. A pull request for a roadmap item carries its `roadmap:<id>` label; ideas go to the suggestion
-queue (the hub, or `/suggest` on Discord) rather than to issues, which are for bugs.
+**Where to start: [playhorizon.dev/hub](https://playhorizon.dev/hub)**, the upstream project's hub. It shows
+what is being done now and next ([ROADMAP.md](ROADMAP.md) in the repository), the work board, good first tasks,
+and the forms to report a bug or suggest something. A pull request for a roadmap item carries its
+`roadmap:<id>` label; ideas go to the suggestion queue (the hub, or `/suggest` on Discord) rather than to
+issues, which are for bugs.
 
 ## Build it
 
 You need Rust (stable), Python 3.10+, JDK 25, and on Linux the ALSA and udev headers (`libasound2-dev libudev-dev`).
-Horizon never downloads the game: it prepares its resources from your own copy of Minecraft 26.3, as described in
+Morizen never downloads the game: it prepares its resources from your own copy of Minecraft 26.3, as described in
 [Build from source](README.md#build-from-source).
 
 ```sh
@@ -28,16 +32,16 @@ The launcher is its own Cargo workspace in `launcher/` (`cd launcher && cargo ru
 ## Vanilla first
 
 Wherever vanilla has a feature, vanilla is the specification, down to the order of random calls. "Parity" here
-means Horizon gives the same results as the pinned 26.3 client and server for the same inputs, checked by a
+means Morizen gives the same results as the pinned 26.3 client and server for the same inputs, checked by a
 **harness**: a `tools/test_*_parity.py` script that runs a small Java oracle against the real game and a Rust
-probe against Horizon, and compares their outputs. There are about 290 of them.
+probe against the engine, and compares their outputs. There are about 290 of them.
 
-- **Read the vanilla code before writing Horizon's.** `tools/rea_vanilla.py` queries the pinned game bytecode:
+- **Read the vanilla code before writing the Rust.** `tools/rea_vanilla.py` queries the pinned game bytecode:
   `python3 tools/rea_vanilla.py method net.minecraft.world.level.block.DispenserBlock dispenseFrom`.
   Say in your pull request which vanilla classes and methods you followed.
 - **Gameplay changes come with a harness**, new or extended, so the next change can't silently break them.
   [The parity workflow](docs/parity-workflow.md) shows how harnesses run; copy a nearby one.
-- **Horizon's own features** (the launcher, the new menus) follow [the design system](docs/design-system.md) and are
+- **Morizen's own features** (the launcher, the new menus) follow [the design system](docs/design-system.md) and are
   off by default wherever they would change the vanilla look.
 - **Everything players run is Rust.** Python and Java are fine for dev tools and harness drivers in `tools/`, never
   for player-facing code.
@@ -49,7 +53,7 @@ The pre-push hook checks the full history reachable from the branches and tags b
 
 ## Only original code
 
-Horizon's code is written from Minecraft 26.3 itself and from public documentation, never from another mod, loader
+Morizen's code is written from Minecraft 26.3 itself and from public documentation, never from another mod, loader
 or renderer. Don't read, copy, translate or paraphrase the source of Iris, OptiFine, Sodium or any other project,
 and don't send code an AI tool wrote from it. Their user documentation and file formats are fine to read, and their
 packs and mods are fine to run and observe. Shader packs were removed on 24 October 2026 (#1561) because their code
@@ -61,7 +65,7 @@ description of the pack format.
 Run the self-check and paste the block it prints into your pull request:
 
 ```sh
-python3 tools/pr_ready.py --base upstream/main   # or origin/main if you work on the main repository
+python3 tools/pr_ready.py --base origin/main
 ```
 
 It looks at what your branch changes and runs what matters: rustfmt, clippy with warnings denied, the tests of the
@@ -86,7 +90,7 @@ configuration and toolchain changes select the whole workspace; CI also keeps it
   release notes), `skip-release` when players see no change (tooling, docs, tests), nothing for a fix.
   `release-now` is for crash fixes that shouldn't wait. pr_ready suggests one.
 
-Who reviews and merges: the Horizon Team, on CI for ordinary pull requests; risky ones (saves, network, world
+Who reviews and merges: the maintainer, on CI for ordinary pull requests; risky ones (saves, network, world
 generation, the launcher's updates) wait for a local proof first ([merging](docs/release-flow.md#merging)).
 
 Every merge to main is released automatically ([release flow](docs/release-flow.md)), so main always stays playable.
