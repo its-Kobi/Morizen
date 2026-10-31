@@ -171,7 +171,7 @@ impl Launcher {
             .child(pick("import-folder", "Import an instance folder…", true))
             .child(text(theme::CAPTION).w_full().text_color(t.muted).child(
                 ".mrpack (Modrinth), .zip (CurseForge), or a Prism, MultiMC or CurseForge instance. \
-                 Horizon ports what it can on this computer, from your own downloads, and plays \
+                 Morizen ports what it can on this computer, from your own downloads, and plays \
                  the pack as its own profile. Nothing is uploaded or shared.",
             ));
         let mut page = div()
@@ -231,7 +231,7 @@ impl Launcher {
         }
     }
 
-    /// The modpacks installed from Horizon's registry: each plays its own profile.
+    /// The modpacks installed from Morizen's registry: each plays its own profile.
     fn registry_pack_rows(&self, cx: &mut Context<Self>) -> Div {
         let t = self.theme;
         let mut list = div().flex().flex_col();
@@ -283,7 +283,7 @@ impl Launcher {
                     )),
                 );
             let detail = format!(
-                "{} from Horizon's registry, its own profile: {}",
+                "{} from Morizen's registry, its own profile: {}",
                 p.version,
                 p.mods.join(", ")
             );
@@ -432,7 +432,7 @@ impl Launcher {
             notes.push(format!("Left off: {line}."));
         }
         if !can_play {
-            notes.push("Playing needs a prepared Horizon version (Play page).".into());
+            notes.push("Playing needs a prepared Morizen version (Play page).".into());
         }
         let mut rows: Vec<&horizon_port_pack::report::Row> = p
             .rows

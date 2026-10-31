@@ -57,7 +57,7 @@ impl Launcher {
                     .child(format!("{}.", tr(account::NEEDS_OWNER))),
             )
             .child(text(theme::UI).text_color(t.muted).child(tr(
-                "Horizon needs a Microsoft account that owns Minecraft: Java Edition, like other launchers.",
+                "Morizen needs a Microsoft account that owns Minecraft: Java Edition, like other launchers.",
             )))
             .child(text(theme::UI).text_color(t.muted).child(tr(
                 "Your worlds, offline names and settings stay where they are.",

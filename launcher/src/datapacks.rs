@@ -157,7 +157,7 @@ pub const READ: [&str; 4] = ["function", "function tag", "predicate", "item_modi
 /// A data pack's files by kind (`function`, `worldgen`, `item tag`...), with how many each.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Coverage {
-    /// What Horizon runs.
+    /// What Morizen runs.
     pub read: Vec<(String, usize)>,
     /// What it doesn't read yet.
     pub unread: Vec<(String, usize)>,
@@ -167,7 +167,7 @@ impl Coverage {
     /// "Runs its 12 functions, 1 predicate. Not read yet: 40 worldgen, 3 recipes."
     pub fn summary(&self) -> String {
         let runs = match self.read.is_empty() {
-            true => "Nothing in it runs in Horizon yet.".to_string(),
+            true => "Nothing in it runs in Morizen yet.".to_string(),
             false => format!("Runs its {}.", counts(&self.read)),
         };
         match self.unread.is_empty() {
@@ -176,7 +176,7 @@ impl Coverage {
         }
     }
 
-    /// "1077 worldgen, 653 loot tables, 16 recipes": what Horizon doesn't read yet, the six
+    /// "1077 worldgen, 653 loot tables, 16 recipes": what Morizen doesn't read yet, the six
     /// biggest kinds and how many other kinds.
     pub fn not_read(&self) -> String {
         let mut biggest = self.unread.clone();

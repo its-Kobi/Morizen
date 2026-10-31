@@ -178,7 +178,7 @@ pub struct Palette {
     trees: u32,
 }
 
-/// The sunset of Horizon's first icon: night blue to violet to coral, and a sun in three bands.
+/// The sunset of Morizen's first icon: night blue to violet to coral, and a sun in three bands.
 pub const SUNSET: Palette = Palette {
     sky: &[
         0x0a0f2c, 0x26206a, 0x4b2a7e, 0x7c3a88, 0xc4527a, 0xee6e5a, 0xffb25e,
@@ -205,7 +205,7 @@ pub const DAWN: Palette = Palette {
 };
 
 /// A blocky landscape, `w` by `h` texels: banded sky, a sun half set behind the far hills and cut
-/// into slices like Horizon's mark, flat clouds, three ridges of hills and a few square trees.
+/// into slices like Morizen's mark, flat clouds, three ridges of hills and a few square trees.
 /// Each part draws from its own generator from left to right, so a wider landscape only adds
 /// columns: the first `w` are the same at every width, and a resized window keeps its view.
 pub fn scene(p: &Palette, seed: u32, w: usize, h: usize) -> Vec<u32> {

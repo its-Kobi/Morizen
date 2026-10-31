@@ -88,7 +88,7 @@ fn shares_and_deletes_through_the_paste_api() {
     let request = served.join().unwrap();
     assert!(request.starts_with("POST /log "), "{request}");
     assert!(
-        request.ends_with(r#"{"content":"[main/INFO]: hello\n","source":"Horizon launcher"}"#),
+        request.ends_with(r#"{"content":"[main/INFO]: hello\n","source":"Morizen launcher"}"#),
         "{request}"
     );
 

@@ -1,4 +1,4 @@
-//! Java mods (Fabric, NeoForge, Forge) from the browser (docs/mod-browser.md). Horizon doesn't
+//! Java mods (Fabric, NeoForge, Forge) from the browser (docs/mod-browser.md). Morizen doesn't
 //! run their code; it ports what they carry (blocks, items, recipes, loot, tags, worldgen) with
 //! `horizon-port-pack`. Before a mod is offered for install its jar is downloaded (checked as
 //! every download is), carried over and its classes read (`horizon_port_pack::check`): the
@@ -101,7 +101,7 @@ pub fn check_project(
         .ok_or_else(|| match versions.iter().find_map(|v| v.blocked.clone()) {
             Some(why) => format!("{} can't be downloaded from here: {why}", project.title),
             None => format!(
-                "{} has no Fabric, NeoForge or Forge version Horizon can port.",
+                "{} has no Fabric, NeoForge or Forge version Morizen can port.",
                 project.title
             ),
         })?;
@@ -205,7 +205,7 @@ impl Job<'_> {
         })?;
         if check.verdict == Verdict::No {
             return Err(format!(
-                "{} doesn't run in Horizon: {}",
+                "{} doesn't run in Morizen: {}",
                 project.title, check.summary
             ));
         }

@@ -16,7 +16,7 @@ pub const AGENT_DOCS_URL: &str = "https://playhorizon.dev/docs/agents";
 /// This launcher's version: the release workflow sets `HORIZON_LAUNCHER_VERSION` from the
 /// tag it builds (no version-bump commits); other builds say Cargo.toml's.
 pub const VERSION: &str = version_or(option_env!("HORIZON_LAUNCHER_VERSION"));
-/// Launcher releases are tagged `launcher@X.Y.Z` from 0.2 on (docs/versioning.md), and Horizon's
+/// Launcher releases are tagged `launcher@X.Y.Z` from 0.2 on (docs/versioning.md), and Morizen's
 /// own `vX.Y.Z`. Before 0.2 they were `launcher-vX.Y.Z` and `vYYYY.MM.DD[.N]`: every 0.2 tag is
 /// newer than every one of those ([`release_order`]).
 pub const LAUNCHER_TAG_PREFIX: &str = "launcher@";
@@ -124,7 +124,7 @@ pub(crate) fn get(url: &str) -> Result<ureq::Response, String> {
     })
 }
 
-/// A Horizon game tag: `v` then a digit (`v2026.10.13`). Launcher tags never match.
+/// A Morizen game tag: `v` then a digit (`v2026.10.13`). Launcher tags never match.
 pub fn is_game_tag(tag: &str) -> bool {
     tag.strip_prefix('v')
         .is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_digit()))
@@ -158,7 +158,7 @@ fn own_tag_of(tag: Option<&str>, injected: Option<&str>) -> String {
     }
 }
 
-/// Where a tag or version stands among Horizon's releases (docs/versioning.md): the tags from
+/// Where a tag or version stands among Morizen's releases (docs/versioning.md): the tags from
 /// before 0.2 (`vYYYY.MM.DD[.N]`, `launcher-vX.Y.Z`) and bare versions first, compared number by
 /// number with missing parts as zero and anything after a `-` ignored, as launchers always did;
 /// then the 0.2 tags (`vX.Y.Z`, `launcher@X.Y.Z`) in semver's order, a pre-release
@@ -169,7 +169,7 @@ pub enum ReleaseOrder {
     Before02(Vec<u64>),
     Semver([u64; 3], Prerelease),
     /// A Nightly (`nightly-<date>-<commit>`), by its date: newer than every release, since the
-    /// Nightly is the only build Horizon ships.
+    /// Nightly is the only build Morizen ships.
     Nightly(String),
 }
 
@@ -301,7 +301,7 @@ fn is_launcher_tag(tag: &str) -> bool {
     launcher_version(tag).is_some()
 }
 
-/// Published Horizon builds, newest first: the current Nightly (the only build Horizon ships since
+/// Published Morizen builds, newest first: the current Nightly (the only build Morizen ships since
 /// 2026-10-28, docs/release-flow.md), the last week's Nightlies, then the releases from before.
 /// Drafts never reach the anonymous API, and launcher releases are left out.
 pub fn releases() -> Result<Vec<Release>, String> {
@@ -384,7 +384,7 @@ fn newest_launcher_tags(refs: &serde_json::Value) -> Vec<String> {
     tags
 }
 
-/// The newest Horizon release that has a build for this platform.
+/// The newest Morizen release that has a build for this platform.
 pub fn latest(releases: &[Release]) -> Option<&Release> {
     releases.iter().find(|r| r.asset.is_some())
 }
@@ -480,7 +480,7 @@ pub fn game_mod_api_level() -> Option<u32> {
 
 /// A game version's mod API level, read once from the mark its program carries
 /// (`horizon_mods::api_level::MARK`). A program from before the mark serves level 0, the
-/// contract of Horizon 0.2.67 and 0.2.68.
+/// contract of Morizen 0.2.67 and 0.2.68.
 pub fn mod_api_level(tag: &str) -> u32 {
     static LEVELS: Mutex<Vec<(String, u32)>> = Mutex::new(Vec::new());
     let mut levels = LEVELS.lock().unwrap_or_else(|e| e.into_inner());
@@ -606,7 +606,7 @@ pub fn install(release: &Release, progress: impl Fn(f32)) -> Result<(), String> 
             fetch_small,
         )?,
         None if is_game_tag(tag) => signed_digest(tag, ASSET.unwrap_or_default())?,
-        None => return Err(format!("{tag} is not a Horizon release.")),
+        None => return Err(format!("{tag} is not a Morizen release.")),
     };
     install_as(release, tag, &sha256, progress)
 }
@@ -693,7 +693,7 @@ pub fn disk_use(tag: &str) -> u64 {
     size(&version_dir(tag))
 }
 
-/// The Minecraft version a Horizon build targets, from its research-lock.json.
+/// The Minecraft version a Morizen build targets, from its research-lock.json.
 pub fn game_version(tag: &str) -> String {
     game_version_at(&version_dir(tag))
 }
@@ -739,7 +739,7 @@ pub fn resources_summary(prepared: bool, sounds: bool, version: &str) -> String 
     use crate::i18n::trf;
     match (prepared, sounds) {
         (false, _) => trf(
-            "Not prepared. Horizon needs the files of your own Minecraft {version}.",
+            "Not prepared. Morizen needs the files of your own Minecraft {version}.",
             &[("version", version)],
         ),
         (true, true) => trf("Prepared for Minecraft {version}", &[("version", version)]),
@@ -949,7 +949,7 @@ pub(crate) fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
 /// After an install: when `tag` is not prepared but another installed version made the same
 /// resources, copies them (not hard links: preparing again rewrites files in place, which would
 /// change both). The player then needs neither their Minecraft folder nor a new preparation to
-/// play a release that only changed Horizon. Returns the version they came from.
+/// play a release that only changed Morizen. Returns the version they came from.
 fn reuse_prepared(versions: &Path, tag: &str) -> Option<String> {
     let target = versions.join(tag);
     let to = resources_at(&target);
@@ -1199,7 +1199,7 @@ fn complete_assets_in(
 
 /// The Minecraft folders whose asset store can hold what a prepared version lacks: the one
 /// chosen in the launcher, the official launcher's (or HORIZON_MINECRAFT_DIR), the folder
-/// other launchers' files are linked into and Horizon's own download, then every launcher's
+/// other launchers' files are linked into and Morizen's own download, then every launcher's
 /// default folder.
 fn minecraft_folders() -> Vec<PathBuf> {
     let mut folders: Vec<PathBuf> = Settings::load().minecraft_dir.into_iter().collect();
@@ -1294,7 +1294,7 @@ fn download_for_owner(
 }
 
 /// Downloads Minecraft `id` (any version on Mojang's list, its version file's sha1 from it) into
-/// Horizon's own game folder, in the official launcher's layout, for an account that owns the
+/// Morizen's own game folder, in the official launcher's layout, for an account that owns the
 /// game (asked again now). Returns that folder.
 pub fn download_version_for_owner(
     id: &str,
@@ -1328,7 +1328,7 @@ pub fn java_game(
 ) -> Result<Command, String> {
     let game = instance.java.as_ref().ok_or_else(|| {
         format!(
-            "{} plays Horizon, not Minecraft: Java Edition",
+            "{} plays Morizen, not Minecraft: Java Edition",
             instance.name
         )
     })?;
@@ -1425,7 +1425,7 @@ fn download_for(
                 sources::Os::Windows => "windows",
             };
             mojang::download(pins, dir, os, 8, fetch, &mojang::CANCEL, log).map_err(|e| {
-                format!("\n  • Horizon tried to download {v} from Mojang for {name}, but: {e}")
+                format!("\n  • Morizen tried to download {v} from Mojang for {name}, but: {e}")
             })
         }
         // An owner by its last answer, who can't be asked now.
@@ -1435,11 +1435,11 @@ fn download_for(
             pass.offline.unwrap_or_default()
         )),
         Err(_) if signed_in => Err(
-            "\n  • No signed-in account owns Minecraft: Java Edition, so Horizon can't download it."
+            "\n  • No signed-in account owns Minecraft: Java Edition, so Morizen can't download it."
                 .into(),
         ),
         Err(_) => Err(format!(
-            "\n  • Or sign in with the Microsoft account that owns Minecraft: Horizon then \
+            "\n  • Or sign in with the Microsoft account that owns Minecraft: Morizen then \
              downloads {v} from Mojang itself."
         )),
     }
@@ -1448,7 +1448,7 @@ fn download_for(
 /// The Java home for this version: a runtime for precompiled exporters, a JDK for older
 /// preparers or changed sources. Forward the selection to external preparers too.
 /// Else try the official launcher's Java in `games`, then download the runtime named by
-/// `manifest` into Horizon's game folder (Mojang's runtimes are whole JDKs).
+/// `manifest` into Morizen's game folder (Mojang's runtimes are whole JDKs).
 fn java(
     major: i64,
     compiler: bool,
@@ -1498,7 +1498,7 @@ fn java(
     let runtime = data_dir().join("minecraft").join("runtime");
     let home = mojang::java_runtime(&component, &runtime, 8, &fetch, &mojang::CANCEL, log)
         .map_err(|e| {
-        format!("{missing}\n  • Horizon also tried to download Minecraft's own Java from Mojang, but: {e}")
+        format!("{missing}\n  • Morizen also tried to download Minecraft's own Java from Mojang, but: {e}")
     })?;
     find(major, &[home]).map(|jdk| jdk.home())
 }
@@ -1580,7 +1580,7 @@ pub fn preparer(
             .and_then(|lock| sources::Pins::read(&lock))
             .ok_or("The version's research-lock.json doesn't pin the Minecraft files")?;
         let own = data_dir().join("minecraft");
-        let mut known = vec![("Horizon's own download", own.clone())];
+        let mut known = vec![("Morizen's own download", own.clone())];
         known.extend(
             sources::Folders::current()
                 .map(|f| sources::known_folders(sources::Os::current(), &f))
@@ -2003,18 +2003,18 @@ pub fn client_command(tag: &str) -> Command {
     cmd.current_dir(home).arg("--resources").arg(resources(tag));
     // PipeWire remembers volume and mute per application name. The game's own name is
     // "PipeWire ALSA [horizon-client]", shared with development and test runs, where
-    // muting it once left every later game silent: played from here it is "Horizon".
+    // muting it once left every later game silent: played from here it is "Morizen".
     if std::env::var_os("PIPEWIRE_PROPS").is_none() {
         cmd.env(
             "PIPEWIRE_PROPS",
-            "{ application.name = \"Horizon\" media.role = \"Game\" }",
+            "{ application.name = \"Morizen\" media.role = \"Game\" }",
         );
     }
     cmd
 }
 
-/// The game's program: on macOS the one inside the version's Horizon.app, so the Dock and Cmd+Tab
-/// show Horizon's name and icon (game_app.rs); the bare binary elsewhere, or if that fails.
+/// The game's program: on macOS the one inside the version's Morizen.app, so the Dock and Cmd+Tab
+/// show Morizen's name and icon (game_app.rs); the bare binary elsewhere, or if that fails.
 fn client_program(tag: &str) -> PathBuf {
     let dir = version_dir(tag);
     #[cfg(target_os = "macos")]
@@ -2227,7 +2227,7 @@ pub fn release_notes(tag: Option<&str>) -> Result<Release, String> {
         Some(tag) => releases
             .into_iter()
             .find(|r| r.tag == tag)
-            .ok_or_else(|| format!("No Horizon release is tagged {tag}.")),
+            .ok_or_else(|| format!("No Morizen release is tagged {tag}.")),
         None => releases
             .into_iter()
             .next()
@@ -2305,14 +2305,14 @@ impl Logged {
 
 // ----- Updates -----------------------------------------------------------------------------------
 
-/// What a check found: a Horizon build newer than every installed one, and a newer launcher.
+/// What a check found: a Morizen build newer than every installed one, and a newer launcher.
 #[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct Updates {
     pub horizon: Option<Release>,
     pub launcher: Option<Release>,
 }
 
-/// The newest Horizon build with a build here (the current Nightly), if it isn't installed and
+/// The newest Morizen build with a build here (the current Nightly), if it isn't installed and
 /// no installed version is newer. Two Nightlies of one day compare equal: the one on GitHub is
 /// the update.
 pub fn horizon_update(releases: &[Release], installed: &[String]) -> Option<Release> {
@@ -2402,7 +2402,7 @@ pub fn install_tag(tag: &str, as_update: bool, progress: impl Fn(f32)) -> Result
         releases
             .iter()
             .find(|r| r.tag == tag)
-            .ok_or_else(|| format!("No Horizon release is tagged {tag}."))?
+            .ok_or_else(|| format!("No Morizen release is tagged {tag}."))?
     };
     if release.asset.is_none() {
         return Err(format!("{} has no build for this platform.", release.tag));
@@ -2479,7 +2479,7 @@ fn replace_binary(new: &Path, _exe: &Path) -> std::io::Result<()> {
     self_replace::self_replace(new)
 }
 
-/// The app bundle the launcher runs from (`…/Horizon.app` for `…/Horizon.app/Contents/MacOS/
+/// The app bundle the launcher runs from (`…/Morizen.app` for `…/Morizen.app/Contents/MacOS/
 /// horizon-launcher`), or None for a bare binary, as launchers before the .app shipped.
 pub fn app_bundle(exe: &Path) -> Option<&Path> {
     let macos = exe.parent()?;
@@ -2602,9 +2602,9 @@ pub fn self_update(release: &Release, progress: impl Fn(f32)) -> Result<(), Stri
     download(&url, size, &sha256, &archive, &progress)?;
     let unpacked = work.join("unpacked");
     unpack(&archive, &url, &unpacked)?;
-    // A launcher inside Horizon.app replaces the whole bundle (its Info.plist, icon and
+    // A launcher inside Morizen.app replaces the whole bundle (its Info.plist, icon and
     // signature belong with the binary); a bare binary, as older launchers are, only the binary,
-    // which the macOS archive also holds (Horizon.app/Contents/MacOS/horizon-launcher).
+    // which the macOS archive also holds (Morizen.app/Contents/MacOS/horizon-launcher).
     if let Some(app) = app_bundle(exe_path()) {
         if let Some(new) = find_app(&unpacked) {
             replace_bundle(&new, app)?;
@@ -2767,7 +2767,7 @@ pub enum Msg {
     PackLine(String),
     /// A modpack step ended: the pack as it now is.
     PackDone(Result<Box<crate::modpacks::Imported>, String>),
-    /// How many play Horizon now, or none when the server can't be reached (`telemetry`).
+    /// How many play Morizen now, or none when the server can't be reached (`telemetry`).
     Playing(Option<u64>),
     /// Where the native-mods build is (`native_mods::Step::label`).
     NativeProgress(String),
@@ -2908,7 +2908,7 @@ impl WhilePlaying {
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 pub struct Settings {
     pub selected: Option<String>,
-    /// The instance Play starts (`instances`), by id. Unset means Horizon, the game's home.
+    /// The instance Play starts (`instances`), by id. Unset means Morizen, the game's home.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instance: Option<String>,
     pub minecraft_dir: Option<PathBuf>,
@@ -2960,11 +2960,11 @@ pub struct Settings {
     /// What the window does while the game runs. Stays by default.
     #[serde(default)]
     pub while_playing: WhilePlaying,
-    /// The accent colour on top of the appearance (`themes::Accent`). Horizon's violet by default.
+    /// The accent colour on top of the appearance (`themes::Accent`). Morizen's violet by default.
     #[serde(default)]
     pub accent: crate::themes::Accent,
     /// Home's background: a picture the player picked, kept in the data folder under this name
-    /// (`themes::keep_background`). Unset shows Horizon's landscape.
+    /// (`themes::keep_background`). Unset shows Morizen's landscape.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub background: Option<String>,
     /// The window's language. Unset follows the system's (`i18n::Language::system`).
@@ -3030,7 +3030,7 @@ impl Settings {
     pub fn language(&self) -> crate::i18n::Language {
         self.language.unwrap_or_else(crate::i18n::Language::system)
     }
-    /// Whether new Horizon versions are installed automatically.
+    /// Whether new Morizen versions are installed automatically.
     pub fn auto_install(&self) -> bool {
         self.install_new_versions.unwrap_or(true)
     }
@@ -3266,7 +3266,7 @@ mod tests {
             .and_then(|(_, v)| v);
         assert!(props.is_some_and(|v| v
             .to_string_lossy()
-            .contains("application.name = \"Horizon\"")));
+            .contains("application.name = \"Morizen\"")));
     }
 
     #[test]
@@ -3777,7 +3777,7 @@ mod tests {
         assert!(select_after_update(None, &installed));
     }
 
-    /// The Nightly is the only build Horizon ships (docs/release-flow.md): every launcher takes the
+    /// The Nightly is the only build Morizen ships (docs/release-flow.md): every launcher takes the
     /// current one as its update, over every release; the last week's are listed, never offered.
     #[test]
     fn every_launcher_updates_to_the_current_nightly() {
@@ -4333,10 +4333,10 @@ mod tests {
 
     #[test]
     fn finds_the_app_bundle_around_the_binary() {
-        let exe = Path::new("/Applications/Horizon.app/Contents/MacOS/horizon-launcher");
+        let exe = Path::new("/Applications/Morizen.app/Contents/MacOS/horizon-launcher");
         assert_eq!(
             app_bundle(exe),
-            Some(Path::new("/Applications/Horizon.app"))
+            Some(Path::new("/Applications/Morizen.app"))
         );
         assert_eq!(app_bundle(Path::new("/Users/me/horizon-launcher")), None);
         assert_eq!(
@@ -4345,8 +4345,8 @@ mod tests {
         );
         let work = std::env::temp_dir().join(format!("horizon-find-app-{}", std::process::id()));
         let _ = fs::remove_dir_all(&work);
-        fs::create_dir_all(work.join("dist/Horizon.app/Contents/MacOS")).unwrap();
-        assert_eq!(find_app(&work), Some(work.join("dist/Horizon.app")));
+        fs::create_dir_all(work.join("dist/Morizen.app/Contents/MacOS")).unwrap();
+        assert_eq!(find_app(&work), Some(work.join("dist/Morizen.app")));
         let _ = fs::remove_dir_all(&work);
     }
 
@@ -4359,7 +4359,7 @@ mod tests {
         let work = std::env::temp_dir().join(format!("horizon-bundle-{}", std::process::id()));
         let _ = fs::remove_dir_all(&work);
         let make = |dir: &Path, version: &str| {
-            let app = dir.join("Horizon.app");
+            let app = dir.join("Morizen.app");
             fs::create_dir_all(app.join("Contents/MacOS")).unwrap();
             fs::create_dir_all(app.join("Contents/Resources")).unwrap();
             let bin = app.join("Contents/MacOS/horizon-launcher");
@@ -4415,7 +4415,7 @@ mod tests {
             .collect();
         assert_eq!(
             left,
-            ["Horizon.app"],
+            ["Morizen.app"],
             "nothing staged or moved aside is left"
         );
 
@@ -4517,7 +4517,7 @@ mod tests {
         let start = std::time::SystemTime::now() - std::time::Duration::from_secs(2);
         assert!(crash_report_in_since(&dir, start).is_none());
         fs::create_dir_all(&dir).unwrap();
-        let report = "---- Horizon Crash Report ----\n// Details below.\n\nTime: 2026-10-14 09:05:07\nDescription: Unexpected error\n\npanicked at src/game.rs:10:5:\nboom\n\t0: horizon_client::game::frame\n";
+        let report = "---- Morizen Crash Report ----\n// Details below.\n\nTime: 2026-10-14 09:05:07\nDescription: Unexpected error\n\npanicked at src/game.rs:10:5:\nboom\n\t0: horizon_client::game::frame\n";
         fs::write(dir.join("crash-2026-10-14_09.05.07-client.txt"), report).unwrap();
         fs::write(dir.join("notes.txt"), "x").unwrap();
         assert_eq!(

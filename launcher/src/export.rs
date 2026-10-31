@@ -1,4 +1,4 @@
-//! Sharing an instance (or a port): its settings, packs and Horizon mods, and the worlds the
+//! Sharing an instance (or a port): its settings, packs and Morizen mods, and the worlds the
 //! player picks, as a `.mrpack` (Modrinth's modpack format, from its published spec) or a plain
 //! `.zip` of the game folder's layout.
 //!
@@ -172,7 +172,7 @@ fn index(name: &str, linked: &[&Linked]) -> serde_json::Value {
         "game": "minecraft",
         "versionId": "1",
         "name": name,
-        "summary": format!("{name}, exported from Horizon."),
+        "summary": format!("{name}, exported from Morizen."),
         "files": files,
         "dependencies": { "minecraft": GAME },
     })

@@ -1,7 +1,7 @@
 //! Instances: separate game folders, each with its own worlds, options and packs.
 //!
 //! Nothing that exists moves. The game's home (`backend::game_home`) stays the default instance,
-//! "Horizon", with its saves and options where they are. Imported modpacks (`ports/<pack>/home/`)
+//! "Morizen", with its saves and options where they are. Imported modpacks (`ports/<pack>/home/`)
 //! and registry modpacks (`horizon-packs/<id>/home/`) are instances too, played from their own
 //! folders as before. New instances get `instances/<slug>/` in the game's home. What the player
 //! chooses about an instance (its name, icon, group) is kept in `instances.json` in the
@@ -31,7 +31,7 @@ pub enum Kind {
     Own,
     /// An imported Java modpack (modpacks.rs).
     Port,
-    /// A modpack from Horizon's registry.
+    /// A modpack from Morizen's registry.
     Pack,
 }
 
@@ -88,7 +88,7 @@ pub struct Meta {
     pub icon: Option<Icon>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
-    /// The Horizon version this instance plays, kept when newer ones are installed. None: the
+    /// The Morizen version this instance plays, kept when newer ones are installed. None: the
     /// launcher's own version, which follows updates.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
@@ -101,7 +101,7 @@ pub struct Meta {
     /// What runs around the game: a pre-launch command, a wrapper, variables (`launch`).
     #[serde(default, skip_serializing_if = "Launch::is_empty")]
     pub launch: Launch,
-    /// Set for a Minecraft: Java Edition instance: it plays the real game, not Horizon.
+    /// Set for a Minecraft: Java Edition instance: it plays the real game, not Morizen.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub java: Option<JavaGame>,
 }
@@ -188,7 +188,7 @@ pub struct Instance {
     pub home: PathBuf,
     pub icon: Option<Icon>,
     pub group: Option<String>,
-    /// Its pinned Horizon version, if any (`Meta::version`).
+    /// Its pinned Morizen version, if any (`Meta::version`).
     pub version: Option<String>,
     pub played: Duration,
     pub last_played: Option<SystemTime>,
@@ -199,14 +199,14 @@ pub struct Instance {
 }
 
 impl Instance {
-    /// Ok when it plays Horizon; for a Java instance, which starts its own game
-    /// (`backend::java_game`), that Horizon's options don't apply to it.
+    /// Ok when it plays Morizen; for a Java instance, which starts its own game
+    /// (`backend::java_game`), that Morizen's options don't apply to it.
     fn horizon(&self) -> Result<(), String> {
         match &self.java {
             None => Ok(()),
             Some(java) => Err(format!(
-                "{} plays Minecraft {} (Java Edition), not Horizon: Play starts it, without a \
-                 Horizon version.",
+                "{} plays Minecraft {} (Java Edition), not Morizen: Play starts it, without a \
+                 Morizen version.",
                 self.name, java.minecraft
             )),
         }
@@ -229,7 +229,7 @@ impl Instance {
     }
 }
 
-/// The instances, by the default game home and the launcher's data folder: Horizon first, then
+/// The instances, by the default game home and the launcher's data folder: Morizen first, then
 /// by group and name.
 pub fn list() -> Vec<Instance> {
     list_in(&backend::game_home(), &backend::data_dir())
@@ -239,7 +239,7 @@ fn list_in(game_home: &Path, data: &Path) -> Vec<Instance> {
     let mut store = Store::load(data);
     let mut found = vec![(
         DEFAULT.to_string(),
-        "Horizon".to_string(),
+        "Morizen".to_string(),
         Kind::Default,
         game_home.to_path_buf(),
         game_home.to_path_buf(),
@@ -324,7 +324,7 @@ fn find_in(all: &[Instance], query: &str) -> Result<Instance, String> {
 }
 
 /// Moves an instance's folder to the Trash (where the player can get it back, worlds and all)
-/// and forgets it: its choices, and the selection when Play started it. Horizon's own instance,
+/// and forgets it: its choices, and the selection when Play started it. Morizen's own instance,
 /// the game's home, stays.
 pub fn delete(query: &str) -> Result<Instance, String> {
     let gone = delete_in(
@@ -363,7 +363,7 @@ fn delete_in(
     Ok(instance)
 }
 
-/// The instance Play starts: the one picked in the launcher, else Horizon.
+/// The instance Play starts: the one picked in the launcher, else Morizen.
 pub fn selected() -> Instance {
     let all = list();
     backend::Settings::load()

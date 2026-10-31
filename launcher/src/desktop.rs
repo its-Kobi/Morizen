@@ -1,5 +1,5 @@
 //! Linux: the launcher puts itself in the applications menu. It writes
-//! `applications/horizon-launcher.desktop` (pointing at wherever the binary is now) and Horizon's
+//! `applications/horizon-launcher.desktop` (pointing at wherever the binary is now) and Morizen's
 //! icon into the `hicolor` theme, under `$XDG_DATA_HOME` (`~/.local/share` by default), so no root
 //! is needed; `horizon.desktop` (hidden from menus) gives the game's window its icon on Wayland.
 //! A release build writes it when it starts only if there is no entry yet or the one there starts
@@ -82,9 +82,9 @@ pub fn launcher_entry(exe: &Path) -> String {
     format!(
         "[Desktop Entry]\n\
          Type=Application\n\
-         Name=Horizon\n\
+         Name=Morizen\n\
          GenericName=Game launcher\n\
-         Comment=Install, prepare and play Horizon, Minecraft: Java Edition {minecraft} rewritten in Rust\n\
+         Comment=Install, prepare and play Morizen, Minecraft: Java Edition {minecraft} rewritten in Rust\n\
          Exec={}\n\
          TryExec={}\n\
          Icon=horizon\n\
@@ -254,9 +254,9 @@ mod tests {
 
     #[test]
     fn exec_paths_are_quoted() {
-        let entry = launcher_entry(Path::new("/home/a b/Horizon \"x\"/horizon-launcher"));
-        assert!(entry.contains("Exec=\"/home/a b/Horizon \\\"x\\\"/horizon-launcher\"\n"));
-        assert!(entry.contains("TryExec=/home/a b/Horizon \"x\"/horizon-launcher\n"));
+        let entry = launcher_entry(Path::new("/home/a b/Morizen \"x\"/horizon-launcher"));
+        assert!(entry.contains("Exec=\"/home/a b/Morizen \\\"x\\\"/horizon-launcher\"\n"));
+        assert!(entry.contains("TryExec=/home/a b/Morizen \"x\"/horizon-launcher\n"));
         assert!(entry.contains("Icon=horizon\n"));
     }
 
@@ -298,7 +298,7 @@ mod tests {
         // Only the main group counts: an action's Exec is not the launcher.
         let action = "[Desktop Action play]\nExec=/a\n[Desktop Entry]\nExec=/b --x\n";
         assert_eq!(entry_target(action).as_deref(), Some("/b"));
-        assert_eq!(entry_target("[Desktop Entry]\nName=Horizon\n"), None);
+        assert_eq!(entry_target("[Desktop Entry]\nName=Morizen\n"), None);
         assert_eq!(entry_target("[Desktop Entry]\nExec=\nTryExec=\n"), None);
     }
 
@@ -331,7 +331,7 @@ mod tests {
         fs::remove_file(&installed).unwrap();
         assert!(needs_repair_in(&data, path));
         // An entry that starts nothing is broken too.
-        fs::write(&entry, "[Desktop Entry]\nName=Horizon\n").unwrap();
+        fs::write(&entry, "[Desktop Entry]\nName=Morizen\n").unwrap();
         assert!(needs_repair_in(&data, path));
         let _ = fs::remove_dir_all(&root);
     }

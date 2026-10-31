@@ -124,7 +124,7 @@ pub struct Shared {
 
 /// Uploads `text` (already [`private`]) and returns its link.
 pub fn share(text: &str) -> Result<Shared, String> {
-    let body = serde_json::json!({ "content": fit(text), "source": "Horizon launcher" });
+    let body = serde_json::json!({ "content": fit(text), "source": "Morizen launcher" });
     let answer: serde_json::Value = ureq::post(&format!("{}/log", api()))
         .send_json(body)
         .map_err(|e| format!("mclo.gs didn't take the log: {e}"))?

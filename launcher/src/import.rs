@@ -107,7 +107,7 @@ pub fn what(file: &Path) -> Result<Dropped, String> {
         return Ok(Dropped::Instance);
     }
     Err(format!(
-        "{name} is neither a pack nor a shared instance: nothing in it that Horizon reads."
+        "{name} is neither a pack nor a shared instance: nothing in it that Morizen reads."
     ))
 }
 

@@ -487,7 +487,7 @@ impl Launcher {
             .child(div().flex().child(back))
             .child(head);
         // Registry projects are rated on the site, signed in with GitHub (one rating per account).
-        if p.source == SourceId::Horizon {
+        if p.source == SourceId::Morizen {
             let url = browser::horizon::rate_url(&p.id);
             page = page.child(
                 div()

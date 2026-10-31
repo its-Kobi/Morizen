@@ -72,7 +72,7 @@ fn programs_are_laid_out_as_install_sh_does() {
     );
     assert!(!rt.join("releases/v1/.installed").exists());
     // The game's macOS bundle is the launcher's, not the server's.
-    assert!(!rt.join("releases/v1/Horizon.app").exists());
+    assert!(!rt.join("releases/v1/Morizen.app").exists());
     // The release finds the game files where horizon-server looks: .local beside it.
     assert!(rt
         .join("current/.local/horizon-client/26.3/horizon-resources.json")
@@ -103,7 +103,7 @@ fn problems_say_what_to_do() {
     assert!(port.message.contains("already used"), "{}", port.message);
     assert!(matches!(port.fix, Some(Fix::UsePort(p)) if p > 25565));
     let files = Problem::explain_with(
-        "horizon-server: no prepared game files. Horizon reads them from",
+        "horizon-server: no prepared game files. Morizen reads them from",
         "",
         &dir,
     );

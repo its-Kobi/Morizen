@@ -177,7 +177,7 @@ fn modrinth_search_asks_for_what_runs() {
 fn java_mods_are_checked_for_1_21_and_later() {
     assert_eq!(
         support(Kind::Mod, &v(&["1.20.1"]), &v(&["forge"])),
-        Support::No("Made for 1.20.1: Horizon ports mods made for 1.21 and later.".into())
+        Support::No("Made for 1.20.1: Morizen ports mods made for 1.21 and later.".into())
     );
     assert!(!support(Kind::Mod, &v(&[GAME]), &v(&["rift"])).installable());
     assert!(matches!(
@@ -430,6 +430,6 @@ fn live_modrinth_search_pick_and_download() {
 #[test]
 fn curseforge_is_coming_soon_and_never_searched() {
     let ids: Vec<SourceId> = sources().iter().map(|s| s.id()).collect();
-    assert_eq!(ids, [SourceId::Modrinth, SourceId::Horizon]);
+    assert_eq!(ids, [SourceId::Modrinth, SourceId::Morizen]);
     assert!(source(SourceId::CurseForge).is_none());
 }

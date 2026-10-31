@@ -1,6 +1,6 @@
 //! Mods and resource packs for a Java Edition instance: the source's own files, for the
 //! instance's Minecraft version and loader, put in its `mods/` and `resourcepacks/` as they are
-//! (nothing is ported). The instance's `mod-browser.json` lists them, as for Horizon's folder.
+//! (nothing is ported). The instance's `mod-browser.json` lists them, as for Morizen's folder.
 use super::installed::{self, Entry, Installed, Step};
 use super::{details, Kind, Project, Query, Source, Version};
 use std::fs;

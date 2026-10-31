@@ -1,4 +1,4 @@
-//! Nightly (docs/release-flow.md): the only build Horizon ships since 2026-10-28, main plus the pull
+//! Nightly (docs/release-flow.md): the only build Morizen ships since 2026-10-28, main plus the pull
 //! requests the trusted reviewers picked, published as the `nightly` pre-release a few times a day.
 //! Every launcher installs it as its update (`backend::horizon_update`), as its own version
 //! `nightly-<date>-<commit>`, beside the player's worlds, which it never touches. Its checksums must

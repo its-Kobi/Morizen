@@ -1,7 +1,7 @@
-//! The Mods page: search Horizon's own registry for mods made for Horizon, or Modrinth
+//! The Mods page: search Morizen's own registry for mods made for Morizen, or Modrinth
 //! (CurseForge: coming soon) for Java mods, modpacks and resource packs, see where each comes
-//! from and how well it runs (a Java mod's jar is checked first; a Horizon mod says whether it is
-//! signed and what it may do), install it with its checksum checked, turn Horizon mods on and
+//! from and how well it runs (a Java mod's jar is checked first; a Morizen mod says whether it is
+//! signed and what it may do), install it with its checksum checked, turn Morizen mods on and
 //! off, and update or remove what was installed (`horizon_launcher::browser`). Imported modpacks
 //! are listed on its Modpacks tab.
 use super::line_edit::{self, Key, LineEdit};
@@ -29,7 +29,7 @@ const CHECKING: usize = 2;
 /// The sources to pick from; CurseForge is shown beside them as coming soon.
 const SOURCES: [(SourceId, &str); 2] = [
     (SourceId::Modrinth, "Modrinth"),
-    (SourceId::Horizon, "Horizon"),
+    (SourceId::Morizen, "Morizen"),
 ];
 const PAGE: usize = 20;
 
@@ -41,7 +41,7 @@ pub(super) enum Event {
     Updates(HashMap<(SourceId, String), String>),
     /// A Java mod's check: its jar read, or why it couldn't be.
     Checked((SourceId, String), Result<Box<Check>, String>),
-    /// What a Horizon registry project says before install: signed or not, what it may do.
+    /// What a Morizen registry project says before install: signed or not, what it may do.
     About(HashMap<String, Vec<String>>),
     /// Registry files taken down that the launcher turned off.
     TakenDown(Vec<String>),
@@ -92,7 +92,7 @@ pub(super) struct Mods {
     native_notice: Option<(SourceId, String, Option<Project>)>,
     /// Java mods' checks, by source and project.
     pub(super) checks: HashMap<(SourceId, String), Checking>,
-    /// Horizon registry projects' trust and capabilities, by id ([`horizon::trust_and_capabilities`]).
+    /// Morizen registry projects' trust and capabilities, by id ([`horizon::trust_and_capabilities`]).
     pub(super) about: HashMap<String, Vec<String>>,
     /// The project page, filters and images.
     pub(super) browse: super::mods_project::Browse,
@@ -144,11 +144,11 @@ impl Mods {
         };
         Self {
             kind,
-            // `HORIZON_LAUNCHER_SOURCE=horizon` opens on Horizon's registry, for screenshots;
+            // `HORIZON_LAUNCHER_SOURCE=horizon` opens on Morizen's registry, for screenshots;
             // shader packs are only there.
             source: match std::env::var("HORIZON_LAUNCHER_SOURCE").as_deref() {
-                _ if kind == PackKind::Shader => SourceId::Horizon,
-                Ok("horizon") => SourceId::Horizon,
+                _ if kind == PackKind::Shader => SourceId::Morizen,
+                Ok("horizon") => SourceId::Morizen,
                 _ => SourceId::Modrinth,
             },
             text: LineEdit::new(String::new(), 100, 40),
@@ -202,7 +202,7 @@ impl Mods {
     pub(super) fn checking(&self, p: &Project) -> bool {
         self.java_for(p.kind).is_none()
             && p.kind == PackKind::Mod
-            && p.source != SourceId::Horizon
+            && p.source != SourceId::Morizen
             && matches!(
                 self.checks.get(&(p.source, p.id.clone())),
                 None | Some(Checking::Running)
@@ -217,7 +217,7 @@ impl Mods {
             return Support::Works;
         }
         let metadata = p.support();
-        if p.kind != PackKind::Mod || p.source == SourceId::Horizon || !metadata.installable() {
+        if p.kind != PackKind::Mod || p.source == SourceId::Morizen || !metadata.installable() {
             return metadata;
         }
         match self.checks.get(&(p.source, p.id.clone())) {
@@ -415,7 +415,7 @@ impl Launcher {
                 ..Query::new(m.text.text(), m.kind)
             },
         };
-        // A Java instance's files are Modrinth's; Horizon's registry is for Horizon.
+        // A Java instance's files are Modrinth's; Morizen's registry is for Morizen.
         let source = match m.java_for(m.kind) {
             Some(_) => SourceId::Modrinth,
             None => m.source,
@@ -426,7 +426,7 @@ impl Launcher {
                 .ok_or_else(|| format!("{} isn't set up.", source.label()))
                 .and_then(|s| s.search(&query));
             let about: HashMap<String, Vec<String>> = match (&result, source) {
-                (Ok(found), SourceId::Horizon) => found
+                (Ok(found), SourceId::Morizen) => found
                     .iter()
                     .map(|p| (p.id.clone(), horizon::trust_and_capabilities(&p.id)))
                     .collect(),
@@ -446,7 +446,7 @@ impl Launcher {
             .mods
             .installed
             .iter()
-            .any(|e| e.source == SourceId::Horizon)
+            .any(|e| e.source == SourceId::Morizen)
         {
             return;
         }
@@ -463,7 +463,7 @@ impl Launcher {
         });
     }
 
-    /// Turns a Horizon mod the browser installed on or off, as the game's Options > Mods does;
+    /// Turns a Morizen mod the browser installed on or off, as the game's Options > Mods does;
     /// in a Java instance, renames its file.
     fn mods_switch(&mut self, e: &installed::Entry) {
         let home = self.mods.home();
@@ -507,7 +507,7 @@ impl Launcher {
         }
         let todo: Vec<Project> = found
             .into_iter()
-            .filter(|p| p.kind == PackKind::Mod && p.source != SourceId::Horizon)
+            .filter(|p| p.kind == PackKind::Mod && p.source != SourceId::Morizen)
             .filter(|p| p.support().installable())
             .filter(|p| !m.checks.contains_key(&(p.source, p.id.clone())))
             .collect();
@@ -655,7 +655,7 @@ impl Launcher {
             return;
         }
         // The first native mod: what it starts, before anything is installed.
-        let first_native = source == SourceId::Horizon
+        let first_native = source == SourceId::Morizen
             && native_mods::needs_notice(
                 self.settings.native_mods,
                 self.settings.native_mods_noticed,
@@ -725,7 +725,7 @@ impl Launcher {
                         ));
                     }
                     modpack = p.kind == PackKind::Modpack;
-                    if modpack && p.source == SourceId::Horizon {
+                    if modpack && p.source == SourceId::Morizen {
                         let pack = horizon::pack::install(&p.id, &progress)?;
                         return Ok(format!(
                             "Installed {} {} as its own profile with {}, each checked. Play it \
@@ -752,7 +752,7 @@ impl Launcher {
                         .iter()
                         .map(|e| format!("{} {}", e.title, e.number))
                         .collect();
-                    if p.source == SourceId::Horizon && p.kind == PackKind::Mod {
+                    if p.source == SourceId::Morizen && p.kind == PackKind::Mod {
                         return Ok(format!(
                             "Installed {} into horizon-mods and turned it on, checksum checked \
                              (Options > Mods in the game).",
@@ -857,8 +857,8 @@ impl Launcher {
         }
         let header = page_header(
             "Mods",
-            "Mods and shader packs made for Horizon from its own reviewed registry, and Java \
-             mods, modpacks and resource packs from Modrinth: Horizon ports what a Java mod \
+            "Mods and shader packs made for Morizen from its own reviewed registry, and Java \
+             mods, modpacks and resource packs from Modrinth: Morizen ports what a Java mod \
              carries (blocks, items, recipes, worldgen) and says before you install what runs. Each file is checked \
              against its source's checksum before it reaches your game folder.",
             &t,
@@ -870,9 +870,9 @@ impl Launcher {
                 let _ = this.update(cx, |this, cx| {
                     if this.mods.kind != kind {
                         this.mods.kind = kind;
-                        // Horizon's own shader packs are on its registry only.
+                        // Morizen's own shader packs are on its registry only.
                         if kind == PackKind::Shader {
-                            this.mods.source = SourceId::Horizon;
+                            this.mods.source = SourceId::Morizen;
                         }
                         // Data packs are on Modrinth only; a world may have been made since.
                         if kind == PackKind::DataPack {
@@ -912,8 +912,8 @@ impl Launcher {
         let java = self.mods.java_for(self.mods.kind).is_some();
         let source_note = (self.mods.kind != PackKind::DataPack && !java)
             .then(|| div().flex().child(self.mods_source_switch(cx)));
-        // The registry lists only what was made for Horizon: no "everything", no Modrinth filters.
-        let registry = self.mods.source == SourceId::Horizon;
+        // The registry lists only what was made for Morizen: no "everything", no Modrinth filters.
+        let registry = self.mods.source == SourceId::Morizen;
         let filters = (!registry).then(|| self.mods_filters(cx));
         let controls = div()
             .flex()
@@ -1179,7 +1179,7 @@ impl Launcher {
             let on = match &self.mods.java {
                 _ if e.kind != PackKind::Mod => None,
                 Some(_) => Some(java_instance::is_on(&self.mods.home(), e)),
-                None if e.source == SourceId::Horizon => Some(
+                None if e.source == SourceId::Morizen => Some(
                     horizon::mod_id(e).is_some_and(|id| java::is_enabled(&self.mods.home(), id)),
                 ),
                 None => None,
@@ -1298,12 +1298,12 @@ impl Launcher {
                     &format!("Nothing found for {}.", target.describe(m.kind)),
                     &t,
                 );
-            } else if m.source == SourceId::Horizon {
-                "Nothing in Horizon's registry matches yet."
+            } else if m.source == SourceId::Morizen {
+                "Nothing in Morizen's registry matches yet."
             } else if m.everything {
                 "Nothing found."
             } else {
-                "Nothing found that runs in Horizon. Show everything lists the rest."
+                "Nothing found that runs in Morizen. Show everything lists the rest."
             };
             return centered(line, &t);
         }
@@ -1384,7 +1384,7 @@ impl Launcher {
                 .child(div().truncate().child(p.summary.clone()))
                 .child(by.join(" · "))
                 .children(
-                    (p.source == SourceId::Horizon)
+                    (p.source == SourceId::Morizen)
                         .then(|| stars(&p.id, &t))
                         .flatten(),
                 )
@@ -1396,7 +1396,7 @@ impl Launcher {
                 .children(
                     m.about
                         .get(&p.id)
-                        .filter(|_| p.source == SourceId::Horizon)
+                        .filter(|_| p.source == SourceId::Morizen)
                         .map(|lines| div().text_color(t.ink_soft).child(lines.join(" · "))),
                 );
             let open = p.clone();
@@ -1441,7 +1441,7 @@ impl Launcher {
 }
 
 impl Launcher {
-    /// The source switch: Modrinth or Horizon's registry, CurseForge shown as coming soon and not
+    /// The source switch: Modrinth or Morizen's registry, CurseForge shown as coming soon and not
     /// clickable, like the Microsoft account's "Coming soon".
     fn mods_source_switch(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         let this = cx.entity().downgrade();

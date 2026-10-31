@@ -737,7 +737,7 @@ impl Launcher {
             Fix::Prepare => match self.selected().cloned() {
                 Some(tag) if backend::is_prepared(&tag) => {
                     self.server_job("Copying the game files", move |log| {
-                        log(format!("Copying the game files prepared for Horizon {tag}"));
+                        log(format!("Copying the game files prepared for Morizen {tag}"));
                         servers::set_up(&tag)
                             .map(|_| "The game files are ready. Press Start again.".to_string())
                             .map_err(Problem::plain)
@@ -1239,7 +1239,7 @@ impl Launcher {
             let result = (|| {
                 if servers::program().is_none() {
                     let tag =
-                        tag.ok_or_else(|| Problem::plain("Install a Horizon version first."))?;
+                        tag.ok_or_else(|| Problem::plain("Install a Morizen version first."))?;
                     servers::set_up(&tag).map_err(Problem::plain)?;
                 }
                 if !dir.join("server.toml").is_file() {
@@ -2124,7 +2124,7 @@ impl Launcher {
         if self.servers.config.is_none() {
             return div().child(centered(
                 if self.older_horizon() {
-                    "This server's Horizon is too old to show its settings here. Update it on \
+                    "This server's Morizen is too old to show its settings here. Update it on \
                      the Backups tab, then they appear."
                 } else {
                     "Reading the settings…"
@@ -2380,7 +2380,7 @@ impl Launcher {
         }
         self.setting_row(
             "Delete server",
-            "Remove this server from Horizon and move its worlds, settings and backups to the trash.".into(),
+            "Remove this server from Morizen and move its worlds, settings and backups to the trash.".into(),
             controls.into_any_element(),
         )
         .items_start()
@@ -2444,12 +2444,12 @@ impl Launcher {
         });
         let about = match (&available, &check, &status.update_last) {
             (Some(tag), _, _) => format!(
-                "Update available: Horizon {tag} (this server runs {release}). Updating backs up \
+                "Update available: Morizen {tag} (this server runs {release}). Updating backs up \
                  the world first, and goes back by itself if the new version doesn't start."
             ),
-            (None, Some(_), _) => format!("Up to date: Horizon {release}."),
-            (None, None, Some((last, _))) => format!("Horizon {release}. {last}"),
-            (None, None, None) => format!("Horizon {release}."),
+            (None, Some(_), _) => format!("Up to date: Morizen {release}."),
+            (None, None, Some((last, _))) => format!("Morizen {release}. {last}"),
+            (None, None, None) => format!("Morizen {release}."),
         };
         let control = match available {
             Some(tag) => {
@@ -2459,7 +2459,7 @@ impl Launcher {
                         this.servers.update = None;
                         if let Some(dir) = this.servers.open.clone() {
                             let done = format!(
-                                "Updated to Horizon {tag}. The world was backed up first (Backups)."
+                                "Updated to Morizen {tag}. The world was backed up first (Backups)."
                             );
                             this.server_job(format!("Updating to {tag}"), move |log| {
                                 servers::run_streamed(&dir, &["update"], log).map(|_| done)
@@ -2503,7 +2503,7 @@ impl Launcher {
             .flex_col()
             .border_t_1()
             .border_color(t.rule)
-            .child(self.setting_row("This server's Horizon", about, control.into_any_element()));
+            .child(self.setting_row("This server's Morizen", about, control.into_any_element()));
         if self.servers.setting("updates", "keep").is_some() {
             rows = rows.child(self.setting_row(
                 "Older versions kept",
@@ -2631,7 +2631,7 @@ impl Launcher {
         if self.older_horizon() {
             return tab
                 .child(text(theme::UI).text_color(t.muted).child(
-                    "This server's Horizon is too old to list its backups here: they're in its \
+                    "This server's Morizen is too old to list its backups here: they're in its \
                      backups folder. Update it below.",
                 ))
                 .child(self.updates_section(status, cx));
@@ -2859,7 +2859,7 @@ impl Launcher {
                             .child("Check Minecraft accounts"),
                     )
                     .child(text(theme::CAPTION).text_color(t.muted).child(
-                        "Only if every player signs in with Microsoft. Leave it off for Horizon \
+                        "Only if every player signs in with Microsoft. Leave it off for Morizen \
                          players without an account: Friends only keeps strangers out.",
                     )),
             );

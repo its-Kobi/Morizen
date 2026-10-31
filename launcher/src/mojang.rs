@@ -2,7 +2,7 @@
 //! owns Minecraft: Java Edition (#434), as other launchers get it: the version JSON, the client
 //! jar, this system's libraries and the assets (the sounds), each checked against its sha1,
 //! in the official launcher's layout in the launcher's data folder. sources.rs then finds them
-//! there like any launcher's. Nothing of Mojang's is part of Horizon.
+//! there like any launcher's. Nothing of Mojang's is part of Morizen.
 //!
 //! Each file is checked against the size and sha1 Mojang lists, and written whole. A download
 //! stopped half way (cancelled, no network) keeps the files it finished: the next one fetches
@@ -60,7 +60,7 @@ pub fn download(
     fetch_manifest(pins, &manifest, fetch, log)?;
     let manifest = read_json(&manifest)?;
     let client = &manifest["downloads"]["client"];
-    // A version Horizon doesn't pin takes its client's sha1 from its version file, itself
+    // A version Morizen doesn't pin takes its client's sha1 from its version file, itself
     // checked against the sha1 Mojang's version list gives (`Pins::for_version`).
     let client_sha1 = match pins.client_sha1.as_str() {
         "" => text(client, "sha1")?,
@@ -345,7 +345,7 @@ fn fetch_file(fetch: Fetch, file: &File) -> Result<Vec<u8>, String> {
     }
     match sha1_hex(&body) {
         actual if actual == file.sha1 => Ok(body),
-        actual => Err(format!("is not the one Horizon pins (sha1 {actual})")),
+        actual => Err(format!("is not the one Morizen pins (sha1 {actual})")),
     }
 }
 

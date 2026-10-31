@@ -49,7 +49,7 @@ pub struct Found {
     pub launcher: &'static str,
     pub name: String,
     /// The Minecraft version: an id (`1.21.1`), `latest` or `latest-snapshot`; none when the
-    /// launcher keeps it where Horizon doesn't read.
+    /// launcher keeps it where Morizen doesn't read.
     pub minecraft: Option<String>,
     pub loader: Option<Loader>,
     /// Its game folder: saves, mods, packs, options.
@@ -382,7 +382,7 @@ pub fn copy_game(found: &Found, to: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// The loader `found` runs, when Horizon installs it (Fabric, Quilt): at the same version.
+/// The loader `found` runs, when Morizen installs it (Fabric, Quilt): at the same version.
 pub fn loader(found: &Found) -> Option<loaders::Loader> {
     let l = found.loader.as_ref()?;
     Some(loaders::Loader {
@@ -392,7 +392,7 @@ pub fn loader(found: &Found) -> Option<loaders::Loader> {
 }
 
 /// A new Java instance named `name` playing what `found` plays (or `minecraft`, the version the
-/// player names), with its loader when Horizon installs it ([`loader`]) and a copy of its game
+/// player names), with its loader when Morizen installs it ([`loader`]) and a copy of its game
 /// folder.
 pub fn import(found: &Found, name: &str, minecraft: Option<&str>) -> Result<Instance, String> {
     let Some(minecraft) = minecraft.or(found.minecraft.as_deref()) else {

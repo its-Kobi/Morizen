@@ -68,12 +68,12 @@ fn each_system_gets_its_plan() {
     assert_eq!(
         plan(
             &both,
-            os(&[r"C:\Horizon\horizon-client.exe", "--world", "My World"]),
+            os(&[r"C:\Morizen\horizon-client.exe", "--world", "My World"]),
             true,
             &Found::default()
         ),
         Plan::Cmd {
-            line: r#"echo hi && nice -n 5 C:\Horizon\horizon-client.exe --world "My World""#.into()
+            line: r#"echo hi && nice -n 5 C:\Morizen\horizon-client.exe --world "My World""#.into()
         }
     );
 }
@@ -233,7 +233,7 @@ fn the_post_exit_command_runs_with_the_instance_variables() {
         .success());
     let written = std::fs::read_to_string(dir.join("after.txt")).unwrap();
     assert_eq!(written.trim(), "My Pack my-pack java 1");
-    // A Horizon instance has no Java.
+    // A Morizen instance has no Java.
     assert!(!instance_vars("H", "horizon", &dir, None)
         .iter()
         .any(|(k, _)| *k == "INST_JAVA"));

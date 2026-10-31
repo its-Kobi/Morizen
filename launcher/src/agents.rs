@@ -188,12 +188,12 @@ mod tests {
 
     #[test]
     fn configs_name_the_launcher_and_quote_its_path() {
-        let exe = Path::new("/Applications/Horizon Launcher.app/Contents/MacOS/horizon-launcher");
+        let exe = Path::new("/Applications/Morizen Launcher.app/Contents/MacOS/horizon-launcher");
         let all = clients(exe);
         let claude = &all[0];
         assert_eq!(
             claude.add_line().unwrap(),
-            "claude mcp add --scope user horizon -- '/Applications/Horizon Launcher.app/Contents/MacOS/horizon-launcher' mcp"
+            "claude mcp add --scope user horizon -- '/Applications/Morizen Launcher.app/Contents/MacOS/horizon-launcher' mcp"
         );
         let parsed: Value = serde_json::from_str(&claude.config).unwrap();
         assert_eq!(parsed["mcpServers"]["horizon"]["args"], json!(["mcp"]));
@@ -204,10 +204,10 @@ mod tests {
         let codex = &all[1];
         assert!(codex
             .config
-            .contains("command = \"/Applications/Horizon Launcher.app"));
+            .contains("command = \"/Applications/Morizen Launcher.app"));
         assert_eq!(
-            toml_string(r#"C:\Horizon\"x".exe"#),
-            r#""C:\\Horizon\\\"x\".exe""#
+            toml_string(r#"C:\Morizen\"x".exe"#),
+            r#""C:\\Morizen\\\"x\".exe""#
         );
         assert!(all.iter().any(|c| c.id == "cursor" && c.add.is_none()));
     }

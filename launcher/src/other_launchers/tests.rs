@@ -70,7 +70,7 @@ fn prism_and_multimc_instances() {
         ]
     );
     assert_eq!(in_folder(&fabric, None)[0].name, "My Fabric");
-    // Fabric comes along at the same version; Forge isn't installed by Horizon yet.
+    // Fabric comes along at the same version; Forge isn't installed by Morizen yet.
     assert_eq!(
         loader(&found[0]),
         Some(crate::loaders::Loader {

@@ -227,7 +227,7 @@ fn a_file_that_is_not_the_pinned_one_stops_the_download() {
     )
     .unwrap_err();
     assert!(
-        error.starts_with("https://piston-data.mojang.com/client.jar is not the one Horizon pins"),
+        error.starts_with("https://piston-data.mojang.com/client.jar is not the one Morizen pins"),
         "{error}"
     );
     assert!(!dir.join("versions/26.3/26.3.jar").exists());
@@ -458,7 +458,7 @@ fn a_cancelled_download_goes_on_where_it_stopped() {
     fs::remove_dir_all(&dir).unwrap();
 }
 
-/// A version Horizon doesn't pin, as Mojang's list names it (its version file's sha1): the
+/// A version Morizen doesn't pin, as Mojang's list names it (its version file's sha1): the
 /// client's sha1 comes from that checked file, and an old version's natives for this system
 /// (a classifier of their library, `${arch}` filled in) come with the libraries.
 #[test]

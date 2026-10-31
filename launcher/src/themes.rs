@@ -1,10 +1,10 @@
 //! The player's own look, on top of Dark, Light or System: an accent colour and a picture behind
 //! Home.
 //!
-//! An accent is a hue. Horizon's violet is the default; another hue turns the violet tokens
+//! An accent is a hue. Morizen's gold is the default; another hue turns the gold tokens
 //! (`horizon_theme::Blocks`' accent and the main action's face, bevel and lip) to it, keeping
 //! their saturation and lightness, then darkens or lightens each just enough to read as well as
-//! the violet does: white on the face at 4.5:1, the accent at 3:1 on every background.
+//! the gold does: dark text on the face at 4.5:1, the accent at 3:1 on every background.
 use horizon_theme::{contrast, Blocks};
 use std::path::{Path, PathBuf};
 
@@ -77,8 +77,13 @@ impl Accent {
             let (_, s, l) = hsl(c);
             (hue, s, l)
         };
-        // The face holds white text.
-        let face = fit(turn(p.face), |c| contrast(p.on_face, c) >= 4.5, -1.);
+        // The face holds its label: darken it under light text, lighten it under dark text.
+        let toward = if contrast(p.on_face, 0xffffff) >= 4.5 {
+            1.
+        } else {
+            -1.
+        };
+        let face = fit(turn(p.face), |c| contrast(p.on_face, c) >= 4.5, toward);
         let (_, _, face_l) = hsl(face);
         let (h, s, l) = turn(p.face_bevel);
         p.face_bevel = from_hsl(h, s, l.max(face_l + 0.08).min(0.92));

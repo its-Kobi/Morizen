@@ -105,7 +105,7 @@ fn existing_worlds_stay_where_they_are_and_every_folder_becomes_an_instance() {
     let all = list_in(&home, &data);
     let ids: Vec<&str> = all.iter().map(|i| i.id.as_str()).collect();
     assert_eq!(ids, [DEFAULT, "pack:cozy", "port:small-pack"]);
-    assert_eq!(all[0].name, "Horizon");
+    assert_eq!(all[0].name, "Morizen");
     assert_eq!(all[0].home, home);
     assert_eq!(all[1].home, home.join("horizon-packs/cozy/home"));
     assert_eq!(all[2].name, "Small Pack");
@@ -300,7 +300,7 @@ fn play_time_reads_as_minutes_then_hours() {
 
 /// A Java instance: an empty folder of its own (the real game keeps its own options), its
 /// version in instances.json, kept by a copy, and refused by Play until the launcher starts
-/// the real game; Horizon instances' entries stay as they were.
+/// the real game; Morizen instances' entries stay as they were.
 #[test]
 fn a_java_instance_plays_one_minecraft_version_in_its_own_folder() {
     let root = scratch("java");
@@ -312,7 +312,7 @@ fn a_java_instance_plays_one_minecraft_version_in_its_own_folder() {
     assert_eq!(java.java.as_ref().unwrap().minecraft, "1.21.4");
     let copy = create_in(&home, &data, "Second", Some(&java), None).unwrap();
     assert_eq!(copy.java, java.java);
-    let horizon = create_in(&home, &data, "Horizon two", None, None).unwrap();
+    let horizon = create_in(&home, &data, "Morizen two", None, None).unwrap();
     assert_eq!(horizon.java, None);
     let store = fs::read_to_string(data.join(FILE)).unwrap();
     assert_eq!(

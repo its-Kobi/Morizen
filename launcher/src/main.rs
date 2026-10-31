@@ -1,4 +1,4 @@
-//! Horizon launcher: installs Horizon builds, prepares them from the player's own Minecraft,
+//! Morizen launcher: installs Morizen builds, prepares them from the player's own Minecraft,
 //! and starts the client or a dedicated server.
 
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
@@ -160,7 +160,7 @@ struct Launcher {
     checked: Option<Instant>,
     update_error: Option<String>,
     self_update: SelfUpdate,
-    /// The Horizon version being installed as an update, and whether it becomes the selected one.
+    /// The Morizen version being installed as an update, and whether it becomes the selected one.
     update_install: Option<(String, bool)>,
     /// The install bar's previous and current fraction, so it moves rather than jumps.
     bar: (f32, f32),
@@ -251,7 +251,7 @@ struct Launcher {
     collection: collection::Collection,
     /// Settings' "Connect an AI agent" (`agents_page`).
     agents: agents_page::AgentsUi,
-    /// How many play Horizon now, while the server answers ("N playing now" on the Play page).
+    /// How many play Morizen now, while the server answers ("N playing now" on the Play page).
     playing: Option<u64>,
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
@@ -266,7 +266,7 @@ struct Launcher {
     /// The Modpacks page: the imported packs (read when the page first opens), the one shown,
     /// the report's filter, and the pipeline step running now with its log.
     packs: Vec<horizon_launcher::modpacks::Imported>,
-    /// Modpacks installed from Horizon's registry, each its own profile.
+    /// Modpacks installed from Morizen's registry, each its own profile.
     registry_packs: Vec<horizon_launcher::browser::horizon::pack::Installed>,
     packs_loaded: Option<Instant>,
     pack_open: Option<String>,
@@ -565,7 +565,7 @@ impl Launcher {
         });
     }
 
-    /// Installs the Horizon version the last check found, keeping the player's choice of
+    /// Installs the Morizen version the last check found, keeping the player's choice of
     /// version unless they were on the newest one.
     fn install_update(&mut self) {
         let Some(release) = self.updates.horizon.clone() else {
@@ -610,7 +610,7 @@ impl Launcher {
                     .cloned()
             });
         let Some(base) = base else {
-            self.native_error = Some(tr("Install Horizon first.").into());
+            self.native_error = Some(tr("Install Morizen first.").into());
             return;
         };
         let folder = match self.native_mods_to_build() {
@@ -963,7 +963,7 @@ impl Launcher {
                                 .and_then(|since| backend::crash_report_since(&home, since));
                             if error.is_some() && report.is_none() && self.switched_to_dx12() {
                                 self.client_error = Some(
-                                    "Horizon's Vulkan renderer crashed while starting on this \
+                                    "Morizen's Vulkan renderer crashed while starting on this \
                                      graphics card, so the game now uses DirectX 12. Press Play \
                                      to start it again. Video Settings > Graphics API switches \
                                      back."
@@ -1044,7 +1044,7 @@ impl Launcher {
         for home in homes {
             match backend::switch_to_dx12(&home) {
                 Ok(changed) => switched |= changed,
-                Err(e) => eprintln!("Horizon launcher: could not switch to DirectX 12: {e}"),
+                Err(e) => eprintln!("Morizen launcher: could not switch to DirectX 12: {e}"),
             }
         }
         switched
@@ -1159,8 +1159,8 @@ impl Launcher {
             .filter(|i| i.java.is_some())
             .cloned();
         if let Some(instance) = java {
-            // Mojang's game: no Horizon version or preparation, only no game already running.
-            // It joins a server; a friend's code and opening a world are Horizon's.
+            // Mojang's game: no Morizen version or preparation, only no game already running.
+            // It joins a server; a friend's code and opening a world are Morizen's.
             self.joining = None;
             let server = self
                 .quick_play
@@ -1216,7 +1216,7 @@ impl Launcher {
     }
 
     /// Whether the selected instance's version can start now, from a shortcut (a server's Join,
-    /// a world's Play, a friend's code): Horizon's only, never a Java instance.
+    /// a world's Play, a friend's code): Morizen's only, never a Java instance.
     pub(crate) fn can_start_selected(&self) -> bool {
         self.selected_instance().is_none_or(|i| i.java.is_none())
             && self.selected().is_some_and(|tag| self.can_start(tag))
@@ -1389,7 +1389,7 @@ fn version_tag(tag: &str) -> Div {
         )
 }
 
-/// Horizon's mark: two stems, their reflection below, and the horizon across in the accent.
+/// Morizen's mark: two stems, their reflection below, and the horizon across in the accent.
 fn mark(size: f32, t: &Theme) -> Div {
     let u = size / 16.;
     let stem = |x: f32, y: f32, color: Hsla| {
@@ -2042,7 +2042,7 @@ impl Launcher {
             )
     }
 
-    /// The sidebar: Horizon and the imported modpacks, the player's servers, then the
+    /// The sidebar: Morizen and the imported modpacks, the player's servers, then the
     /// launcher's own update, the community links and its version.
     fn sidebar(&mut self, window: &Window, cx: &mut Context<Self>) -> Stateful<Div> {
         let t = self.theme;
@@ -2416,7 +2416,7 @@ impl Launcher {
 
     fn play_page(&mut self, banner_width: f32, cx: &mut Context<Self>) -> Div {
         let t = self.theme;
-        // A Java instance plays Mojang's game: no Horizon version, nothing of Horizon's to prepare.
+        // A Java instance plays Mojang's game: no Morizen version, nothing of Morizen's to prepare.
         let java = self.selected_instance().and_then(|i| i.java.clone());
         let Some(tag) = self
             .selected()
@@ -2513,7 +2513,7 @@ impl Launcher {
                     .child(play),
             );
 
-        // Not prepared: an owner can have Horizon download Minecraft from Mojang; without an
+        // Not prepared: an owner can have Morizen download Minecraft from Mojang; without an
         // owner there is nothing to play, so signing in comes first.
         let first = (!prepared && !self.preparing)
             .then_some(self.owner_shown())
@@ -2527,7 +2527,7 @@ impl Launcher {
                 &[("version", &version)],
             ),
             Some(true) => trf(
-                "Not prepared. Horizon can download Minecraft {version} from Mojang for your account, or use your own install.",
+                "Not prepared. Morizen can download Minecraft {version} from Mojang for your account, or use your own install.",
                 &[("version", &version)],
             ),
             Some(false) => trf(
@@ -2605,7 +2605,7 @@ impl Launcher {
             || {
                 div()
                     .child(if owner {
-                        tr("None needed: Horizon downloads Minecraft from Mojang for your account.")
+                        tr("None needed: Morizen downloads Minecraft from Mojang for your account.")
                     } else {
                         tr("Not found. Choose the folder where your launcher keeps Minecraft.")
                     })
@@ -2707,7 +2707,7 @@ impl Launcher {
             }
         }
 
-        // The banner: Horizon's landscape (`art.rs`) under a veil of the page colour, the hero and
+        // The banner: Morizen's landscape (`art.rs`) under a veil of the page colour, the hero and
         // the Play row over it. It reaches the content's edges and the top bar.
         let (scene, scene_width) = self.art.scene(t.dark, self.scale, banner_width);
         let veil = |angle: f32, from: f32, to: f32, at: f32| {
@@ -2829,7 +2829,7 @@ impl Launcher {
         page
     }
 
-    /// "Horizon crashed": the report and the logs, and where to report it.
+    /// "Morizen crashed": the report and the logs, and where to report it.
     fn crash_notice(&self, crash: Crash, cx: &mut Context<Self>) -> Div {
         let t = self.theme;
         let mut actions = div().flex().flex_wrap().gap(px(8.)).mt(px(8.));
@@ -2905,7 +2905,7 @@ impl Launcher {
             .child(
                 text(theme::HEADING)
                     .text_color(t.ink)
-                    .child(tr("Horizon crashed")),
+                    .child(tr("Morizen crashed")),
             );
         if !crash.summary.is_empty() {
             body = body.child(div().text_color(t.ink_soft).child(crash.summary));
@@ -2956,7 +2956,7 @@ impl Launcher {
         let title = if tag.is_empty() {
             "Minecraft"
         } else {
-            "Horizon"
+            "Morizen"
         };
         // Never squeezed by the rows below: the ping notice can make it tall.
         let mut hero = div()
@@ -3300,7 +3300,16 @@ impl Launcher {
                     .child(group("AI", "terminal"))
                     .child(self.no_ai_row(n + 6, cx))
                     .child(group("About", "info-box"))
-                    .child(index_row(n + 7, "Horizon", Some(plain(&horizon)), horizon_action, &t))
+                    .child(index_row(
+                        n + 7,
+                        tr("Fork"),
+                        Some(plain(
+                            "Morizen is a fork: this launcher and the whole project are a fork of Horizon, not made or endorsed by the Horizon project.",
+                        )),
+                        None,
+                        &t,
+                    ))
+                    .child(index_row(n + 8, "Morizen", Some(plain(&horizon)), horizon_action, &t))
                     .child(index_row(
                         n + 8,
                         tr("Launcher"),
@@ -3339,7 +3348,7 @@ impl Launcher {
                             n + 11,
                             tr("Applications menu"),
                             Some(plain(if self.settings.desktop_entry() {
-                                "Horizon and its icon are in your desktop's menu."
+                                "Morizen and its icon are in your desktop's menu."
                             } else {
                                 "Not in your desktop's menu."
                             })),
@@ -3677,7 +3686,7 @@ impl Launcher {
             Some(SignInState::Done(Ok(a))) => div().child(format!("Signed in as {}.", a.name)),
             Some(SignInState::Done(Err(e))) => div().text_color(t.danger).child(e.clone()),
             None if self.accounts.accounts.is_empty() => div().child(tr(
-                "Horizon needs a Microsoft account that owns Minecraft: Java Edition, like other launchers. It also plays online servers with your name and skin.",
+                "Morizen needs a Microsoft account that owns Minecraft: Java Edition, like other launchers. It also plays online servers with your name and skin.",
             )),
             None => div().child(tr("Add another account.")),
         };
@@ -3828,7 +3837,7 @@ impl Launcher {
     }
 
     /// Plays the selected instance straight into a world (`--world`) or a server (`--server`):
-    /// flags every Horizon release takes.
+    /// flags every Morizen release takes.
     pub(crate) fn quick_play(&mut self, flag: &'static str, value: String) {
         self.quick_play = Some((flag, value));
         self.play();
@@ -4112,7 +4121,7 @@ impl Launcher {
                                 .child("Support the work below"),
                         )
                         .child(text(theme::UI).text_color(t.muted).child(
-                            "Horizon is built in the open. Sponsors fund the next release.",
+                            "Morizen is built in the open. Sponsors fund the next release.",
                         )),
                 )
                 .child(
@@ -4524,8 +4533,8 @@ fn key_bindings() -> Vec<KeyBinding> {
 fn menus() -> Vec<Menu> {
     vec![
         Menu {
-            name: "Horizon Launcher".into(),
-            items: vec![MenuItem::action("Quit Horizon Launcher", Quit)],
+            name: "Morizen Launcher".into(),
+            items: vec![MenuItem::action("Quit Morizen Launcher", Quit)],
         },
         Menu {
             name: "Window".into(),
@@ -4657,10 +4666,10 @@ mod tests {
     #[test]
     fn the_app_menu_has_quit() {
         let menus = super::menus();
-        assert_eq!(menus[0].name, "Horizon Launcher");
+        assert_eq!(menus[0].name, "Morizen Launcher");
         assert!(matches!(
             &menus[0].items[0],
-            gpui::MenuItem::Action { name, .. } if name == "Quit Horizon Launcher"
+            gpui::MenuItem::Action { name, .. } if name == "Quit Morizen Launcher"
         ));
     }
 

@@ -345,7 +345,7 @@ impl Launcher {
                 panel = panel
                     .child(text(theme::UI).text_color(t.ink).child(
                         "Tailscale is installed. Sign in with your own account in Tailscale \
-                         (Horizon never sees it), then come back here.",
+                         (Morizen never sees it), then come back here.",
                     ))
                     .when(cfg!(target_os = "linux"), |d| {
                         d.child(line(format!(
@@ -404,7 +404,7 @@ impl Launcher {
                 .child(self.invite_section(&ip, port, cx)),
         );
         panel = panel.child(line(
-            "Horizon never turns on Funnel: the server isn't put on the public internet, only \
+            "Morizen never turns on Funnel: the server isn't put on the public internet, only \
              shared with the people you invite."
                 .into(),
         ));
@@ -673,7 +673,7 @@ impl Launcher {
                     let snippet = tailscale::snippet(ip, port);
                     safety = safety
                         .child(text(theme::UI).text_color(t.ink).child(
-                            "Your access controls are your own, so Horizon leaves them alone. To \
+                            "Your access controls are your own, so Morizen leaves them alone. To \
                              keep shared friends to Minecraft, add this rule in the admin console:",
                         ))
                         .child(

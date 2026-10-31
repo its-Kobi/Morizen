@@ -1,9 +1,9 @@
-//! Horizon's design tokens, the one source of truth for the launcher (`launcher/src/theme.rs`),
+//! Morizen's design tokens, the one source of truth for the launcher (`launcher/src/theme.rs`),
 //! the game's on-screen keyboard (`horizon-client`'s `ui_theme`) and the website (`tokens.css` in this crate,
 //! generated from [`css`] by `cargo run -p xtask -- tokens`, which the site's build reads from main). Change a value here and all three
 //! follow. The system is described in `docs/design-system.md`.
 //!
-//! Cool neutrals in two appearances and one violet accent; Geist and Geist Mono only, bundled
+//! Warm neutrals in two appearances and one gold accent; Geist and Geist Mono only, bundled        
 //! here under the SIL Open Font License (`fonts/OFL-Geist.txt`). Colours are `0xRRGGBB`; sizes
 //! are in logical pixels.
 use std::fmt::Write as _;
@@ -67,7 +67,7 @@ pub mod icons {
         "search",
         "server",
         "sliders",
-        // Not Pixelarticons': drawn for Horizon's ratings, in the same 2-unit grid.
+        // Not Pixelarticons': drawn for Morizen's ratings, in the same 2-unit grid.
         "star",
         "terminal",
         "trash",
@@ -81,7 +81,7 @@ pub mod icons {
     }
 }
 
-/// Horizon's icon at 64 px (PNG), for window title bars and task bars at run time. Rendered from
+/// Morizen's icon at 64 px (PNG), for window title bars and task bars at run time. Rendered from
 /// `docs/media/brand/icon.svg` by `cargo run -p xtask -- icons`.
 pub const ICON_PNG: &[u8] = include_bytes!("../icons/horizon-64.png");
 
@@ -337,9 +337,8 @@ pub const DARK: Palette = Palette {
 };
 
 /// The launcher's and the website's blocky look ("Blocks" in `docs/design-system.md`): stone-dark
-/// (or lavender-light) neutrals with a violet cast, panels with a dark outline, a light bevel on top
-/// and a darker lip below, and the violet `face` of the one big action. The game's menus keep
-/// [`LIGHT`] and [`DARK`].
+/// (or warm-light) neutrals, panels with a dark outline, a light bevel on top and a darker lip
+/// below, and the gold `face` of the one big action. The game's menus keep [`LIGHT`] and [`DARK`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Blocks {
     /// The window behind everything, tiled with a faint stone texture.
@@ -382,54 +381,54 @@ pub struct Blocks {
 }
 
 pub const BLOCKS_DARK: Blocks = Blocks {
-    page: 0x0f0d17,
-    side: 0x0b0a11,
-    panel: 0x1a1727,
-    raised: 0x221e34,
-    button: 0x2b2641,
-    button_bevel: 0x3d3560,
-    well: 0x0c0b12,
-    bevel: 0x342d52,
-    lip: 0x07060b,
-    outline: 0x05040a,
-    rule: 0x120f1c,
-    ink: 0xecedf3,
-    ink_soft: 0xc5c7d1,
-    muted: 0xa29cb8,
-    accent: 0x9a86ff,
-    face: 0x5b3fd6,
-    face_bevel: 0x8a74ff,
-    face_lip: 0x3a2694,
-    on_face: 0xffffff,
-    danger: 0xf07a68,
-    success: 0x45c27a,
-    warn: 0xf0b84f,
+    page: 0x0f0d0a,
+    side: 0x080806,
+    panel: 0x1a1815,
+    raised: 0x24211b,
+    button: 0x2e2a20,
+    button_bevel: 0x46402c,
+    well: 0x0b0a07,
+    bevel: 0x3d3826,
+    lip: 0x050504,
+    outline: 0x030302,
+    rule: 0x141209,
+    ink: 0xf5f3ea,
+    ink_soft: 0xccc8b8,
+    muted: 0xa8a293,
+    accent: 0xffd21e,
+    face: 0xf5c400,
+    face_bevel: 0xffe066,
+    face_lip: 0xb08a00,
+    on_face: 0x14120a,
+    danger: 0xff7a6b,
+    success: 0x4fd18a,
+    warn: 0xff9a3c,
     dark: true,
 };
 
 pub const BLOCKS_LIGHT: Blocks = Blocks {
-    page: 0xece7f7,
-    side: 0xe2dbf2,
-    panel: 0xf8f6fd,
-    raised: 0xe9e3f8,
-    button: 0xddd4f3,
-    button_bevel: 0xf4f0fe,
-    well: 0xf3f0fb,
+    page: 0xf7f5ec,
+    side: 0xefece0,
+    panel: 0xfdfcf7,
+    raised: 0xf3f0e4,
+    button: 0xe7e3d3,
+    button_bevel: 0xfffdf6,
+    well: 0xf8f6ed,
     bevel: 0xffffff,
-    lip: 0xc3b8e2,
-    outline: 0x2b2244,
-    rule: 0xe4ddf4,
-    ink: 0x1b1530,
-    ink_soft: 0x3b3354,
-    muted: 0x585071,
-    accent: 0x5333c9,
-    face: 0x5b3fd6,
-    face_bevel: 0x8069ef,
-    face_lip: 0x3a2694,
-    on_face: 0xffffff,
+    lip: 0xc9c3ad,
+    outline: 0x1c1a12,
+    rule: 0xe9e5d7,
+    ink: 0x1a1810,
+    ink_soft: 0x3a3628,
+    muted: 0x5a5544,
+    accent: 0x7a5b00,
+    face: 0xf5c400,
+    face_bevel: 0xffe066,
+    face_lip: 0xb08a00,
+    on_face: 0x14120a,
     danger: 0xa3301d,
     success: 0x136336,
-    warn: 0x7a4f00,
+    warn: 0x8f4a00,
     dark: false,
 };
 

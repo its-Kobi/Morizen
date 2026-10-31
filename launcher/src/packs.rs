@@ -4,7 +4,7 @@
 //!   `pack.mcmeta`. The ones turned on are `options.txt`'s `resourcePacks` list (vanilla's
 //!   format, `"file/<name>"`, the bottom first), so the game's Resource Packs screen shows the
 //!   same choice. A pack turned on here goes on top, as the screen puts a newly picked one.
-//! - Shader packs: `shaderpacks/`, Horizon's own (a folder with `horizon-shaders.toml`, or a
+//! - Shader packs: `shaderpacks/`, Morizen's own (a folder with `horizon-shaders.toml`, or a
 //!   `.hshader`) and those in the `shaders/` format (a `.zip`, or a folder with `shaders/`), as
 //!   the game's Shader Packs page lists them (`shader_pack_list`). One at most is on:
 //!   `pickedShaderPack` in `horizon-graphics.txt`.
@@ -40,7 +40,7 @@ pub struct Pack {
     /// Its file or folder name in the pack folder: the id commands take.
     pub file: String,
     pub path: PathBuf,
-    /// A Horizon shader pack's own name, else the file's.
+    /// A Morizen shader pack's own name, else the file's.
     pub title: String,
     /// `pack.mcmeta`'s description as plain text; a shader pack's format.
     pub description: String,
@@ -103,7 +103,7 @@ fn read(path: &Path, kind: Kind, on: &[String]) -> Option<Pack> {
                 .and_then(|t| t.get("name")?.as_str().map(str::to_string));
             (
                 name.unwrap_or_else(|| file.clone()),
-                "Horizon shader pack".into(),
+                "Morizen shader pack".into(),
                 None,
             )
         }
@@ -263,7 +263,7 @@ pub fn find(home: &Path, kind: Kind, query: &str) -> Result<Pack, String> {
         .ok_or_else(|| format!("No pack {query} in {}", home.join(kind.folder()).display()))
 }
 
-/// What a dropped or picked file is: a resource pack (a zip with `pack.mcmeta`), a Horizon
+/// What a dropped or picked file is: a resource pack (a zip with `pack.mcmeta`), a Morizen
 /// shader pack (`.hshader`), or a shader pack in the `shaders/` format (a zip with `shaders/`).
 pub fn kind_of(file: &Path) -> Result<Kind, String> {
     let name = file

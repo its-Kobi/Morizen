@@ -70,14 +70,14 @@ impl Environment {
     }
 }
 
-/// A search's filters. Empty: the browser's defaults (what runs in Horizon).
+/// A search's filters. Empty: the browser's defaults (what runs in Morizen).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Filters {
     /// Every one of these categories (`decoration`, `worldgen`...).
     pub categories: Vec<String>,
     /// One loader (`neoforge`, `fabric`...), in place of the kind's defaults.
     pub loader: Option<String>,
-    /// One Minecraft version, in place of the one Horizon plays.
+    /// One Minecraft version, in place of the one Morizen plays.
     pub game_version: Option<String>,
     pub environment: Option<Environment>,
     /// None: by relevance with search text, else by downloads.
@@ -93,7 +93,7 @@ impl Filters {
             Sort::Relevance
         })
     }
-    /// A game version other than the one Horizon plays was asked for.
+    /// A game version other than the one Morizen plays was asked for.
     pub fn other_version(&self) -> bool {
         self.game_version.as_deref().is_some_and(|v| v != GAME)
     }

@@ -9,7 +9,7 @@
 //! Minecraft: Java Edition, as other launchers do. Offline names play behind such an account.
 //! The game binary itself, its harnesses and the servers don't go through the launcher's gate.
 //!
-//! The Azure app (client ID) is Horizon's own and is configuration: `HORIZON_MSA_CLIENT_ID` at
+//! The Azure app (client ID) is Morizen's own and is configuration: `HORIZON_MSA_CLIENT_ID` at
 //! build time, or at run time to override it. Without one, sign-in says it is not configured.
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -639,7 +639,7 @@ impl SecretStore for SystemStore {
             let attributes = vec![("service", SERVICE), ("account", key)];
             keyring
                 .create_item(
-                    "Horizon launcher: Minecraft account",
+                    "Morizen launcher: Minecraft account",
                     &attributes,
                     secret.as_bytes(),
                     true,
