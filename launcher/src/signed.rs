@@ -9,7 +9,13 @@ use horizon_release_sign::{PublicKey, SIGNATURE, SUMS};
 
 /// Where a release's attached file downloads from (GitHub's fixed address for it).
 pub fn asset_url(tag: &str, name: &str) -> String {
-    format!("https://github.com/{REPO}/releases/download/{tag}/{name}")
+    asset_url_in(REPO, tag, name)
+}
+
+/// [`asset_url`] for an explicit repository. Launcher self-updates use Morizen's repository while
+/// game versions intentionally continue to use Horizon's.
+pub fn asset_url_in(repo: &str, tag: &str, name: &str) -> String {
+    format!("https://github.com/{repo}/releases/download/{tag}/{name}")
 }
 
 /// The signed SHA-256 of `asset` in release `tag`, fetching its SHA256SUMS and SHA256SUMS.sig
@@ -21,11 +27,25 @@ pub fn digest(
     keys: &[PublicKey],
     fetch: impl Fn(&str) -> Result<Option<Vec<u8>>, String>,
 ) -> Result<String, String> {
-    if let Some(hex) = horizon_release_sign::legacy_digest(tag, asset) {
-        return Ok(hex.to_owned());
+    digest_in(REPO, tag, asset, keys, fetch)
+}
+
+/// [`digest`] for a release in `repo`. The legacy pins belong only to Horizon; a Morizen
+/// launcher release must carry signed checksums of its own.
+pub fn digest_in(
+    repo: &str,
+    tag: &str,
+    asset: &str,
+    keys: &[PublicKey],
+    fetch: impl Fn(&str) -> Result<Option<Vec<u8>>, String>,
+) -> Result<String, String> {
+    if repo == REPO {
+        if let Some(hex) = horizon_release_sign::legacy_digest(tag, asset) {
+            return Ok(hex.to_owned());
+        }
     }
-    let sums = fetch(&asset_url(tag, SUMS))?;
-    let signature = fetch(&asset_url(tag, SIGNATURE))?
+    let sums = fetch(&asset_url_in(repo, tag, SUMS))?;
+    let signature = fetch(&asset_url_in(repo, tag, SIGNATURE))?
         .map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
     horizon_release_sign::signed_digest(tag, asset, sums.as_deref(), signature.as_deref(), keys)
 }
@@ -58,6 +78,19 @@ mod tests {
             !horizon_release_sign::trusted_keys().is_empty(),
             "crates/horizon-release-sign/release-keys.txt lists no key"
         );
+    }
+
+    #[test]
+    fn launcher_assets_can_be_kept_in_the_forks_repository() {
+        assert_eq!(
+            asset_url_in(
+                crate::backend::LAUNCHER_REPO,
+                "launcher@1.2.3",
+                "horizon-launcher-windows-x64.zip"
+            ),
+            "https://github.com/its-Kobi/Morizen/releases/download/launcher@1.2.3/horizon-launcher-windows-x64.zip"
+        );
+        assert!(asset_url("v1.2.3", "game.zip").contains("horizon-rust/horizon"));
     }
 
     #[test]

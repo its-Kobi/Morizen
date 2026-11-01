@@ -9,7 +9,12 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
+/// The upstream engine repository. Game builds, their signed checksums and native-mod source
+/// revisions continue to come from Horizon.
 pub const REPO: &str = "horizon-rust/horizon";
+/// This fork's repository. Only launcher self-updates come from here, so an upstream Horizon
+/// launcher can never replace Morizen's branding and settings.
+pub const LAUNCHER_REPO: &str = "its-Kobi/Morizen";
 pub const README_URL: &str = "https://github.com/horizon-rust/horizon/blob/main/launcher/README.md";
 /// The players' page on connecting an AI agent (the website's docs/agents.md).
 pub const AGENT_DOCS_URL: &str = "https://playhorizon.dev/docs/agents";
@@ -252,10 +257,22 @@ pub fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
     release_order(a).cmp(&release_order(b))
 }
 
-/// Every published release of the repository, both kinds, as GitHub's JSON.
-fn release_list() -> Result<serde_json::Value, String> {
-    let url = format!("https://api.github.com/repos/{REPO}/releases?per_page=100");
+/// Every published release of `repo`, as GitHub's JSON.
+fn release_list_in(repo: &str) -> Result<serde_json::Value, String> {
+    let url = format!("https://api.github.com/repos/{repo}/releases?per_page=100");
     get(&url)?.into_json().map_err(|e| e.to_string())
+}
+
+/// Horizon's game releases. Keeping this source separate from [`launcher_release_list`] is what
+/// lets Morizen continue receiving game versions without replacing its launcher with Horizon's.
+fn release_list() -> Result<serde_json::Value, String> {
+    release_list_in(REPO)
+}
+
+/// Morizen's own launcher releases. A missing/private repository or no launcher release simply
+/// means there is no self-update; it must never fall back to Horizon's launcher releases.
+fn launcher_release_list() -> Result<serde_json::Value, String> {
+    release_list_in(LAUNCHER_REPO)
 }
 
 /// The releases in `list` whose tag passes `keep`, newest first, with the asset named `asset`.
@@ -345,7 +362,7 @@ fn launcher_releases_in_with(
     if found.iter().any(|r| r.asset.is_some()) {
         return found;
     }
-    let api = format!("https://api.github.com/repos/{REPO}");
+    let api = format!("https://api.github.com/repos/{LAUNCHER_REPO}");
     let mut tags = Vec::new();
     for prefix in [LAUNCHER_TAG_PREFIX, OLD_LAUNCHER_TAG_PREFIX] {
         // Every `launcher@` tag is newer than every `launcher-v` one: those only when there is none.
@@ -531,9 +548,23 @@ pub(crate) fn fetch_small(url: &str) -> Result<Option<Vec<u8>>, String> {
     Ok(Some(body))
 }
 
-/// The SHA-256 the release's signed checksums give for `asset`, or why it must not be installed.
+/// The SHA-256 the upstream game release's signed checksums give for `asset`, or why it must not
+/// be installed.
 fn signed_digest(tag: &str, asset: &str) -> Result<String, String> {
-    crate::signed::digest(
+    crate::signed::digest_in(
+        REPO,
+        tag,
+        asset,
+        &horizon_release_sign::trusted_keys(),
+        fetch_small,
+    )
+}
+
+/// The SHA-256 from a Morizen launcher release. The repository is explicit so self-update can
+/// never follow Horizon even though game updates intentionally still do.
+fn launcher_signed_digest(tag: &str, asset: &str) -> Result<String, String> {
+    crate::signed::digest_in(
+        LAUNCHER_REPO,
         tag,
         asset,
         &horizon_release_sign::trusted_keys(),
@@ -2337,13 +2368,23 @@ fn launcher_update_from(releases: &[Release], own: &str) -> Option<Release> {
         .cloned()
 }
 
-/// Load the game's release list and both update kinds from the same GitHub response.
-/// Publish the game releases before any fallback lookups for older launcher tags, so those
-/// lookups cannot hold up the release pages or opening animation. A list error reaches both.
+/// Load Horizon's game releases, then independently look for a launcher release in Morizen's own
+/// repository. Publish the game releases first, so the separate launcher request cannot hold up
+/// the release pages or opening animation. A missing launcher repository means no self-update;
+/// it never falls back to an upstream Horizon launcher.
 pub fn releases_and_updates(
     on_releases: impl FnOnce(Result<Vec<Release>, String>),
 ) -> Result<Updates, String> {
-    releases_and_updates_with(release_list, installed, launcher_releases_in, on_releases)
+    releases_and_updates_with(
+        release_list,
+        installed,
+        |_| {
+            launcher_release_list()
+                .map(|list| launcher_releases_in(&list))
+                .unwrap_or_default()
+        },
+        on_releases,
+    )
 }
 
 fn releases_and_updates_with(
@@ -2593,7 +2634,7 @@ pub fn self_update(release: &Release, progress: impl Fn(f32)) -> Result<(), Stri
         progress(1.0);
         return Ok(());
     }
-    let sha256 = signed_digest(&release.tag, LAUNCHER_ASSET.unwrap_or_default())?;
+    let sha256 = launcher_signed_digest(&release.tag, LAUNCHER_ASSET.unwrap_or_default())?;
     let work = data_dir().join(".launcher-update");
     let _ = fs::remove_dir_all(&work);
     fs::create_dir_all(&work).map_err(|e| e.to_string())?;
@@ -3685,6 +3726,10 @@ mod tests {
         let lookup = |with_new: bool| {
             asked.borrow_mut().clear();
             launcher_releases_in_with(&serde_json::json!([]), |url| {
+                assert!(
+                    url.starts_with("https://api.github.com/repos/its-Kobi/Morizen/"),
+                    "launcher lookup escaped to another repository: {url}"
+                );
                 asked
                     .borrow_mut()
                     .push(url.rsplit('/').next().unwrap_or("").to_string());

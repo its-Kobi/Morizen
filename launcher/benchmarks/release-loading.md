@@ -1,10 +1,12 @@
 # Shared startup release response
 
-Startup previously fetched `/releases?per_page=100` on two worker threads: one
-for game releases and one for updates. It now decodes that response once and
-parses game releases once, publishing them before older-launcher fallback
-lookups. Manual and four-hour update checks still request fresh data. Release
-page retries remain independent. Existing self-update guards still apply.
+Startup previously fetched Horizon's `/releases?per_page=100` on two worker
+threads: one for game releases and one for updates. It now decodes that response
+once and parses game releases once. Morizen's launcher update is intentionally a
+separate request to `its-Kobi/Morizen`, made only after the game releases are
+published; it can never fall back to a Horizon launcher. Manual and periodic
+update checks still request fresh data. Release page retries remain independent.
+Existing self-update guards still apply.
 
 Run the committed benchmark against the actual backend implementation:
 

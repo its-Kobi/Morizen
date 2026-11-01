@@ -262,10 +262,12 @@ minimize, maximize/restore and close; macOS and Linux keep their system title ba
 The launcher looks for a newer Nightly when it starts and every 30 minutes while it is open, and
 shows a small "available, Install" line on Play.
 
-It also updates itself from GitHub releases tagged `launcher@X.Y.Z` (the game's are `nightly`, and
-`vX.Y.Z` before 2026-10-28; neither is ever taken for the other). Before 0.2 they were `launcher-vX.Y.Z` and `vYYYY.MM.DD`:
-every 0.2 tag counts as newer than all of those (docs/versioning.md). It downloads the new build, replaces its
-own binary, and offers "Restart" in the footer. Development builds and
+It also updates itself only from Morizen's own `its-Kobi/Morizen` GitHub releases tagged
+`launcher@X.Y.Z`. Game versions still come from `horizon-rust/horizon` (`nightly`, and `vX.Y.Z`
+before 2026-10-28), and neither source is ever taken for the other. Before 0.2 the tags were
+`launcher-vX.Y.Z` and `vYYYY.MM.DD`:
+every 0.2 tag counts as newer than all of those (docs/versioning.md). It downloads the new build,
+replaces its own binary, and offers "Restart" in the footer. Development builds and
 `HORIZON_LAUNCHER_NO_SELF_UPDATE=1` never replace themselves.
 
 On Linux a release build that starts writes its applications-menu entry only when there is
