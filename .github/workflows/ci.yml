@@ -118,6 +118,9 @@ jobs:
   launcher-windows:
     runs-on: windows-latest
     timeout-minutes: 40
+    env:
+      # Keep the uploaded executable portable: it must not require the Visual C++ redistributable.
+      RUSTFLAGS: -C target-feature=+crt-static
     steps:
       - uses: actions/checkout@v4
         with:
@@ -137,14 +140,22 @@ jobs:
         if: steps.launcher.outputs.required != 'false'
         with:
           workspaces: launcher
-          shared-key: launcher-windows
+          shared-key: launcher-windows-release
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Build and test the launcher on Windows
+      - name: Build and test the release launcher on Windows
         if: steps.launcher.outputs.required != 'false'
         working-directory: launcher
         run: |
-          cargo +stable build --locked --bin horizon-launcher
-          cargo +stable test --locked --lib
+          cargo +stable test --release --locked --lib
+          cargo +stable build --release --locked --bin horizon-launcher
+      - name: Upload the Windows launcher
+        if: steps.launcher.outputs.required != 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: morizen-launcher-windows-x64
+          path: launcher/target/release/horizon-launcher.exe
+          if-no-files-found: error
+          retention-days: 14
   # Most pull requests leave the harnesses to parity-main, which runs them on main a batch of merges at a time
   # (.github/workflows/parity-main.yml; releases wait for it). A pull request still runs them itself when it changes
   # a harness, an oracle, a probe or the runner, or carries the run-parity label (run-parity.yml, when it is added).
