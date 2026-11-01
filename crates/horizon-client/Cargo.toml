@@ -30,6 +30,10 @@ horizon-friends = { path = "../horizon-friends" }
 # Horizon mods: sandboxed WebAssembly components, off unless installed and turned on (docs/mods.md).
 # Their runtime is the `mods` feature.
 horizon-mods = { path = "../horizon-mods", default-features = false, features = ["index"] }
+# Experimental in-process Java/Fabric bridge. Both dependencies and every hook
+# disappear unless the explicit `java-mods` feature is selected.
+morizen-compat = { path = "../morizen-compat", optional = true }
+morizen-jvm = { path = "../morizen-jvm", optional = true }
 wgpu = { version = "30.0.1", default-features = false, features = ["std", "parking_lot", "vulkan", "metal", "wgsl", "naga-ir"] }
 winit = "0.30.13"
 pollster = "0.4"
@@ -91,6 +95,8 @@ default = ["audio", "controllers"]
 audio = ["horizon-client-render/audio"]
 # Controllers: gilrs, and the DualSense's own output. Without it only `horizon-ctl pad`'s virtual pad.
 controllers = ["dep:gilrs", "dep:horizon-dualsense", "horizon-client-input/controllers"]
+# Embeds a user-supplied JDK and Fabric Loader. Never enabled by default.
+java-mods = ["dep:morizen-compat", "dep:morizen-jvm"]
 # Records the call sites of mob random draws (`mob_ai_probe` traces).
 rng-trace = ["horizon-core/rng-trace"]
 

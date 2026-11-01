@@ -1,8 +1,9 @@
 # Java mod bridge: embedded Fabric in native Morizen
 
-Status: **Phase 0 design and evidence** (2026-11-01). No Java mod runs in the Rust engine yet.
-The implementation is developed only on `feature/java-mod-bridge` and is off unless the game is
-built with Cargo feature `java-mods`.
+Status: **Phase 1 implemented and demonstrated locally** (2026-11-02). Real Fabric Loader runs in
+an embedded JVM and invokes a purpose-built mod's `main` and `client` code. No Minecraft API shim,
+registry content or real-world mod functionality is claimed yet. The implementation is developed
+only on `feature/java-mod-bridge` and is off unless the game is built with Cargo feature `java-mods`.
 
 ## Goal and hard boundary
 
@@ -29,9 +30,10 @@ The following are non-negotiable:
 
 ### Minecraft 26.3 uses Mojang's unobfuscated names
 
-**Answer:** 26.3 Fabric mods are built against the named `net.minecraft.*` classes and named
-members shipped by Mojang, not `class_1234` intermediary names. The bridge runtime namespace must
-therefore be `named` and no Tiny/Yarn/intermediary remap belongs in the 26.3 path.
+**Answer:** 26.3 Fabric mods are built against the readable `net.minecraft.*` classes and members
+shipped by Mojang, not `class_1234` intermediary names. Fabric calls this unobfuscated namespace
+`official` (not `named`), so the bridge runtime and distribution namespaces must be `official` and
+no Tiny/Yarn/intermediary remap belongs in the 26.3 path.
 
 Evidence:
 
@@ -46,7 +48,7 @@ Evidence:
 4. A signature-only scan of the five hash-pinned, released 26.3 Fabric artifacts in
    `tools/benchmark-deps/mods.lock.json` found the following unique class references:
 
-   | Artifact | Named `net/minecraft/...` | Intermediary `class_N` |
+   | Artifact | Readable `net/minecraft/...` | Intermediary `class_N` |
    |---|---:|---:|
    | Fabric API 0.161.0+26.3 (44 nested modules) | 1,125 | 0 |
    | Sodium 0.9.2 | 303 | 0 |
@@ -62,7 +64,8 @@ signatures. `tools/gen_compat` must still refuse generation unless the local jar
 
 ### What Fabric mods expect
 
-For 26.3, a production mod jar's own classes use the named namespace. `fabric.mod.json` still
+For 26.3, a production mod jar's own classes use Mojang's readable names in Fabric's `official`
+namespace. `fabric.mod.json` still
 declares loader and Minecraft version constraints, entrypoint keys, Mixin configurations, nested
 jars and an optional class tweaker/access widener. Fabric Loader is responsible for discovery,
 dependency solving, nested jars, side selection, language adapters and creating entrypoints.
@@ -74,7 +77,9 @@ The bridge advertises two built-in mods to Fabric:
 - `morizen` at the native client version, so bridge-aware mods can detect the host.
 
 `MorizenGameProvider.getGameId()` returns `minecraft` for loader/mapping compatibility and
-`getGameName()` returns `Morizen`. Its runtime and default distribution namespaces are `named`.
+`getGameName()` returns `Morizen`. Its runtime and default distribution namespaces are `official`.
+Phase 1 confirmed the label directly: Fabric API, Sodium, Lithium and ImmediatelyFast class
+tweakers all declare `official` and reject a provider that incorrectly advertises `named`.
 
 ### Fabric Loader contract (pinned 0.19.5)
 
@@ -101,14 +106,15 @@ loader bump cannot silently change the contract.
 
 Provider bootstrap:
 
-1. `morizen-jvm` starts `KnotClient` on the dedicated JVM/mod thread.
-2. The provider service is on the parent class path. Mojang's client jar is absent, so Fabric's
-   bundled Minecraft provider cannot locate a game; `MorizenGameProvider` must be the enabled
-   provider that succeeds. The test asserts the selected provider id before loading a mod.
-3. `locateGame` validates the game directory, local shim jar and mod paths passed by Rust.
+1. `morizen-jvm` starts `KnotClient` through the provider's exception-formatting wrapper on the
+   dedicated JVM/mod thread.
+2. The provider service is on the parent class path and `fabric.skipMcProvider=true`; Mojang's
+   client jar is absent. The test asserts the selected provider class before loading a mod.
+3. `locateGame` validates the game directory and local bootstrap path; Rust validates every mod and
+   library path before starting the VM.
 4. `getBuiltinMods` uses Fabric's `BuiltinModMetadata.Builder` for `minecraft` and `morizen`.
-5. `unlockClassPath` adds only the locally generated shim jar to Knot's target class loader. It is
-   deliberately absent from the parent class path.
+5. `unlockClassPath` adds the bootstrap jar to Knot's target class loader. Phase 2 adds the locally
+   generated shim jar there too; neither belongs on the parent class path.
 6. `launch(ClassLoader)` loads `dev.morizen.compat.Bootstrap` through the supplied Knot loader.
 7. Bootstrap establishes the target context class loader, initializes loader entrypoints and hands
    the target loader back to Rust as a JNI global reference.
@@ -204,7 +210,7 @@ numeric handles. The client maps those batches to engine resources at narrow fea
 `tools/gen_compat` takes the user's exact 26.3 client jar and:
 
 1. checks the jar SHA-1 against `research-lock.json`;
-2. rejects a manifest with mapping downloads (the 26.3 path is named);
+2. rejects a manifest with mapping downloads (the 26.3 path is unobfuscated `official`);
 3. reads class access, hierarchy, interfaces, field names/descriptors/access and method
    names/descriptors/access/exceptions;
 4. records nest/inner-class, record, enum and permitted-subclass shape needed by the JVM verifier;
@@ -410,6 +416,97 @@ an empty report. `compat-java/test-mods/empty` writes a deterministic marker. It
 name the JDK, selected provider, Loader 0.19.5, mod id/version, entrypoint begin/end and shutdown. No
 `net.minecraft` shim is needed yet.
 
+#### Phase 1 result
+
+Phase 1 now provides:
+
+- `morizen-jvm`: JDK discovery (explicit path, `MORIZEN_JAVA_HOME`, `JAVA_HOME`, then `java.home`),
+  strict Java 25 validation, platform `libjvm` lookup, bounded heap/options, one owner thread named
+  `Java mods`, JNI exception conversion with a bounded nested cause chain, a retained global target
+  class-loader reference and bounded shutdown;
+- `morizen-compat`: engine-neutral report types, unsupported-call deduplication/counting and atomic
+  JSON report replacement on Unix and Windows;
+- the real hash-pinned Fabric Loader 0.19.5, Mixin 0.8.7 and ASM libraries, with
+  `MorizenGameProvider` selected through `ServiceLoader`, `minecraft@26.3` and `morizen@0.1.0`
+  built-ins, `official` runtime/distribution namespaces and Bootstrap loaded by Knot rather than the
+  parent loader;
+- `compat-java/test-mods/empty`, whose real Fabric `main` and `client` entrypoints append
+  `main\nclient\n` to a marker; and `test-mods/failing`, which proves a nested initializer exception
+  reaches Rust and `compat-report.json` without crashing the process;
+- `tools/compat_ledger.py`, currently **9.6% (8/83 weighted members)**. Loader discovery,
+  dependency resolution and the two client entrypoints have evidence; the loader area remains
+  partial because server entrypoints, nested-jar evidence, Mixins and access wideners are not yet
+  supported by bridge shims;
+- a minimal `horizon-client` hook controlled by `MORIZEN_JAVA_MOD_CONFIG`, compiled only with Cargo
+  feature `java-mods`. A loader/mod failure logs and disables Java mods rather than stopping the
+  native game.
+
+No Mojang jar or real Minecraft process was used. Java classes, test-mod jars and reports were built
+only under ignored `.local/java-mod-bridge/`.
+
+The successful empty-mod log contained:
+
+```text
+morizen-java: jdk=25.0.5.0.2
+FabricLoader/GameProvider: Loading Morizen 26.3 with Fabric Loader 0.19.5
+morizen-java: provider=minecraft class=dev.morizen.compat.provider.MorizenGameProvider
+morizen-java: mod=morizen_empty@1.0.0
+morizen-java: entrypoint=main begin ... thread=Java mods
+morizen-java: entrypoint=main end ... thread=Java mods
+morizen-java: entrypoint=client begin ... thread=Java mods
+morizen-java: entrypoint=client end ... thread=Java mods
+morizen-java: shutdown end
+```
+
+#### Phase 1 real-mod trials
+
+`py -3 tools/java_mod_bridge.py real-mods` ran all five hash-pinned 26.3 artifacts from
+`tools/benchmark-deps/mods.lock.json`, each in a fresh process/home and without a Minecraft jar.
+These are diagnostic results, not compatibility claims:
+
+| Artifact | Result | First observed gap |
+|---|---|---|
+| Sodium 0.9.2 (+ pinned Fabric API) | unsupported | Loader/Mixin initialization reaches missing game runtime dependencies (`org.slf4j.LoggerFactory`); many `net.minecraft.*` targets also have no Phase 2 shim |
+| Lithium 0.26.2 | unsupported | required Mixin target `HoglinSpecificSensor` is absent |
+| FerriteCore 9.0.0 | partial load only | process reaches Bootstrap because it has no entrypoint, but its `net.minecraft.*` Mixin targets are absent and its plugin also lacks Log4j; none of its functionality ran |
+| Fabric API 0.161.0+26.3 | unsupported | missing Guava (`MapMaker`) and then absent game classes/shims |
+| ImmediatelyFast 1.17.1 | unsupported | missing `net.minecraft.server.packs.resources.PreparableReloadListener` |
+
+The machine has no user-installed 26.3 client/runtime library set, so Phase 1 could not add the
+official third-party game libraries (Guava, SLF4J, Log4j) to these trials. `LaunchConfig` accepts
+verified `game_libraries` separately and never accepts the Minecraft client jar. The trials did
+confirm that released class tweakers call the readable namespace `official`; the initial Phase 0
+`named` label was corrected above.
+
+#### Phase 1 commands actually run
+
+| Command | Result |
+|---|---|
+| `cargo check -p morizen-compat -p morizen-jvm --all-targets` | passed |
+| `cargo test -p morizen-compat -p morizen-jvm --lib --bins --tests --examples` | 4 passed |
+| `cargo test -p morizen-compat -p morizen-jvm --doc` | passed (no doctests) |
+| `py -3 -m unittest tests.test_java_mod_bridge tests.test_compat_ledger tests.test_lab.PublicationTests` | 8 passed |
+| `py -3 -m unittest discover -s tests` | 429 run, 12 skipped; bridge tests passed; one existing root-`README.md` parity-heading failure and one unrelated Python 3.14/Windows cp1252 error in `test_port_publish` |
+| `py -3 tools/compat_ledger.py --check` | passed, 8/83 weighted members |
+| `py -3 tools/java_mod_bridge.py test` | passed provider reflection contract, empty `main`/`client` demo, report, shutdown and expected failing-mod exception translation |
+| `py -3 tools/java_mod_bridge.py real-mods` | completed five isolated trials; results above |
+| `cargo check -p horizon-client --no-default-features` | blocked in existing dependency `ring`: bundled `gcc.exe` has no `cc1` on this Windows GNU toolchain, before `horizon-client` was checked |
+| `cargo check -p horizon-client --no-default-features --features java-mods` | same `ring`/`cc1` environment blocker before client code |
+| `cargo clippy -p morizen-compat -p morizen-jvm --all-targets -- -D warnings` | not run: this installed Rust toolchain has no Clippy component |
+| `py -3 tools/parity.py --changed-files <phase-1-files> --list` | 361 harnesses selected (root workspace manifest changed); not run on this blocked client toolchain |
+| `py -3 tools/pr_ready.py --quick --base 89f447c07` | timed out after 20 minutes in content-root tests; before timeout public tree and rustfmt passed, the existing root-README test failed, Clippy was unavailable, and workspace tests/doctests hit the same `ring`/`cc1` blocker |
+
+To reproduce the headless demo by hand, run `py -3 tools/java_mod_bridge.py prepare`; it prints the
+fresh local config path. Then run
+`cargo run -p morizen-jvm --example empty_fabric -- <that-run-config.json>`. The one-command gate is
+`py -3 tools/java_mod_bridge.py test`. Starting the full native client additionally requires a
+working platform C toolchain and setting `MORIZEN_JAVA_MOD_CONFIG` to that config while building with
+`--features java-mods`. There is deliberately no launcher UI before Phase 2.
+
+Phase 2 still needs signature-only local shim generation, native registration calls, block/item
+transactions and resource mounting. It must also prove a feature-off client executable is identical
+to the base build on a machine that can compile the client.
+
 | Phase | Required demo and gate |
 |---:|---|
 | 2 | Generated local shims; one block/item appear in registries, creative inventory and world with translation/model/texture. Feature-off probe is byte-identical to base. |
@@ -421,8 +518,8 @@ name the JDK, selected provider, Loader 0.19.5, mod id/version, entrypoint begin
 
 ## Test layout
 
-Test mods under `compat-java/test-mods/` are `empty`, `registry`, `lifecycle`, `world`,
-`network-ui` and one `mixin-*` per injection/access pattern.
+Test mods under `compat-java/test-mods/` begin with Phase 1's `empty` and `failing`; later phases add
+`registry`, `lifecycle`, `world`, `network-ui` and one `mixin-*` per injection/access pattern.
 
 Each runner uses fresh `HORIZON_HOME`, `XDG_*` and launcher homes under the approved temp folder.
 No real player data is written. Feature-off tests run first, feature-on tests second. Optional
@@ -497,5 +594,5 @@ metadata, hashes, service resources and class/member signatures were inspected.
 | `cargo check -p horizon-client --no-default-features` | blocked before checking the client: `ring` could not find `gcc.exe` in this Windows GNU toolchain |
 | `py -3 tools/pr_ready.py --quick --base main` | public tree passed; no Rust crate was selected; the repository-wide Python suite ran 423 tests with 12 skipped and failed one pre-existing check, `test_readme_percentage_matches_table`, because the root `README.md` has no parity heading |
 
-Phase 0 has no runtime mod demo: its deliverable is this design and reproducible provider/mapping
-evidence. Phase 1 is not started until this document is committed.
+Phase 0 had no runtime mod demo: its deliverable was this design and reproducible provider/mapping
+evidence. It was committed before Phase 1 implementation began.

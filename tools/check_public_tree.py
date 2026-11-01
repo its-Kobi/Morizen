@@ -9,12 +9,23 @@ import sys
 PRIVATE_ROOTS = {".local", "decompiled", "minecraft", "assets", "run", "logs"}
 PRIVATE_EXTENSIONS = {".jar", ".class", ".jfr", ".hprof", ".java"}
 ORIGINAL_JDK_TOOLS = {"tools/JfrSummary.java", "tests/java/JfrFixture.java"}
+JAVA_MOD_BRIDGE_ROOTS = (
+    "compat-java/src/main/java/dev/morizen/",
+    "compat-java/src/test/java/dev/morizen/",
+)
 
 
 def prohibited(path):
     parsed = PurePosixPath(path)
     # Original JDK-only tools are an exact allowlist; recovered game Java stays private.
     if path in ORIGINAL_JDK_TOOLS:
+        return False
+    # Clean-room bridge/provider code is original Morizen code. Generated
+    # net.minecraft signature shims stay under .local/ and are never allowed.
+    if parsed.suffix == ".java" and (
+        path.startswith(JAVA_MOD_BRIDGE_ROOTS)
+        or (path.startswith("compat-java/test-mods/") and "/src/main/java/dev/morizen/" in path)
+    ):
         return False
     # Original Horizon mod sources may also be tracked.
     if parsed.suffix == ".java" and path.startswith(("mods/horizon/src/", "mods/horizon-lab/src/")):

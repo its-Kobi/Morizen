@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "morizen_empty",
+  "version": "1.0.0",
+  "name": "Morizen empty bridge test",
+  "environment": "client",
+  "entrypoints": {
+    "main": ["dev.morizen.testmod.EmptyMod"],
+    "client": ["dev.morizen.testmod.EmptyMod"]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.5",
+    "minecraft": "=26.3",
+    "java": ">=25"
+  }
+}

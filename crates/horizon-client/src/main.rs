@@ -27,11 +27,26 @@ fn main() {
         log::info!("Horizon {}", crash::version());
         crash::install(home.clone(), side);
     }
+    #[cfg(feature = "java-mods")]
+    let _java_mod_host = if help || args.iter().any(|argument| argument == "--dedicated") {
+        None
+    } else {
+        match morizen_jvm::JavaModHost::start_from_environment() {
+            Ok(host) => host,
+            Err(error) => {
+                // A bridge or mod failure disables Java mods, never the native game.
+                log::error!("Java mods disabled: {error}");
+                None
+            }
+        }
+    };
     if let Err(error) = game::run() {
         log::error!("Horizon: {error}");
         if !help {
             crash::report_error(&home, side, &*error);
         }
+        #[cfg(feature = "java-mods")]
+        drop(_java_mod_host);
         // Started from Explorer, the console window closes with the game:
         // keep the message on screen until it is read.
         #[cfg(windows)]

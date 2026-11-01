@@ -173,10 +173,17 @@ class PublicationTests(unittest.TestCase):
         for path in [".local/minecraft/source.java", "decompiled/Foo.txt", "game.JAR", "capture.jfr", "source/Foo.java"]:
             self.assertTrue(check_public_tree.prohibited(path), path)
         for path in ["tools/lab.py", "crates/horizon-core/src/lib.rs", "Cargo.lock", "docs/analysis.md",
-                     "mods/horizon/src/main/java/dev/horizonlab/HorizonLab.java",
-                     "mods/horizon-lab/src/main/java/dev/horizonlab/HorizonLab.java"]:
+                      "mods/horizon/src/main/java/dev/horizonlab/HorizonLab.java",
+                      "mods/horizon-lab/src/main/java/dev/horizonlab/HorizonLab.java",
+                      "compat-java/src/main/java/dev/morizen/compat/Bootstrap.java",
+                      "compat-java/src/test/java/dev/morizen/compat/LoaderContractTest.java",
+                      "compat-java/test-mods/empty/src/main/java/dev/morizen/testmod/EmptyMod.java"]:
             self.assertFalse(check_public_tree.prohibited(path), path)
         self.assertTrue(check_public_tree.prohibited("mods/horizon/src/main/java/net/minecraft/Client.java"))
+        for path in ["compat-java/src/main/java/net/minecraft/Client.java",
+                     "compat-java/test-mods/empty/src/main/java/net/minecraft/Client.java",
+                     "compat-java/generated-src/net/minecraft/Client.java"]:
+            self.assertTrue(check_public_tree.prohibited(path), path)
         for path in ["tools/JfrSummary.java", "tests/java/JfrFixture.java"]:
             self.assertFalse(check_public_tree.prohibited(path), path)
         for path in ["tools/Minecraft.java", "tests/java/Client.java", ".local/tools/JfrSummary.java"]:

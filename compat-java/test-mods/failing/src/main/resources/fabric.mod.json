@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "morizen_failing",
+  "version": "1.0.0",
+  "name": "Morizen failing bridge test",
+  "environment": "client",
+  "entrypoints": {
+    "main": ["dev.morizen.testmod.FailingMod"]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.5",
+    "minecraft": "=26.3",
+    "java": ">=25"
+  }
+}
