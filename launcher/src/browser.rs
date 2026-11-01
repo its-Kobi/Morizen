@@ -76,6 +76,8 @@ pub enum SourceId {
     /// Morizen's own registry of reviewed mods, modpacks and resource packs ([`horizon`]).
     #[serde(alias = "horizon")]
     Morizen,
+    /// A jar the player picked from this computer. It has no remote source or automatic update.
+    Local,
 }
 
 impl SourceId {
@@ -84,6 +86,7 @@ impl SourceId {
             SourceId::Modrinth => "Modrinth",
             SourceId::CurseForge => "CurseForge",
             SourceId::Morizen => "Morizen",
+            SourceId::Local => "this computer",
         }
     }
 }

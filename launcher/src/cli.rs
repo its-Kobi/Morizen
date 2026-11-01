@@ -333,7 +333,7 @@ enum InstanceCmd {
     /// Import what a file is, as dropping it on the window does: a shared instance (a .mrpack
     /// without mod loaders, such as `instance export` writes, or a game folder zip) becomes a
     /// new instance; a Java modpack goes to the Modpacks import; a resource or shader pack into
-    /// the instance (default: the selected one)
+    /// the instance; a Fabric/Quilt JAR into a matching Java instance (default: selected)
     Import {
         file: PathBuf,
         /// The instance a pack goes into
@@ -2794,6 +2794,47 @@ fn instance(action: InstanceCmd, as_json: bool) -> Result<(), String> {
                          datapack-add <world> <file>",
                         file.display()
                     ))
+                }
+                Dropped::JavaMod => {
+                    let i = match instance {
+                        Some(name) => instances::find(&name)?,
+                        None => instances::selected(),
+                    };
+                    let java = i.java.as_ref().ok_or_else(|| {
+                        format!(
+                            "{} plays Morizen's Rust game: select a Fabric or Quilt Java \
+                             instance for a JAR mod.",
+                            i.name
+                        )
+                    })?;
+                    let m = horizon_launcher::browser::java_instance::install_local(
+                        &file,
+                        &java.target(),
+                        &i.home,
+                    )?;
+                    let installed_file = i
+                        .home
+                        .join("mods")
+                        .join(file.file_name().unwrap_or_default())
+                        .with_extension("jar");
+                    if as_json {
+                        json(serde_json::json!({
+                            "instance": i.name,
+                            "loader": m.loader.id(),
+                            "id": m.id,
+                            "name": m.name,
+                            "version": m.version,
+                            "file": installed_file,
+                        }));
+                    } else {
+                        println!(
+                            "Added {} {} to {}'s {} mods.",
+                            m.name,
+                            m.version,
+                            i.name,
+                            m.loader.name()
+                        );
+                    }
                 }
             }
         }

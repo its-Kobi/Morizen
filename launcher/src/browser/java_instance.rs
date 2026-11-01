@@ -1,13 +1,21 @@
 //! Mods and resource packs for a Java Edition instance: the source's own files, for the
 //! instance's Minecraft version and loader, put in its `mods/` and `resourcepacks/` as they are
-//! (nothing is ported). The instance's `mod-browser.json` lists them, as for Morizen's folder.
+//! (nothing is ported). The instance's `mod-browser.json` lists downloaded files, as for Morizen's
+//! folder. Local Fabric/Quilt jars are inspected without running code, copied beside them and
+//! listed as local files, without claiming a remote source or automatic update.
 use super::installed::{self, Entry, Installed, Step};
-use super::{details, Kind, Project, Query, Source, Version};
+use super::{details, Kind, Project, Query, Source, SourceId, Version};
+use crate::loaders::Kind as LoaderKind;
 use std::fs;
+use std::io::Read;
 use std::path::Path;
+use std::sync::Mutex;
 
 /// How deep required dependencies are followed.
 const MAX_DEPTH: usize = 4;
+/// Several jars can be dropped together. Their duplicate check, copy and manifest save are one
+/// operation so two background imports cannot both claim the same mod id.
+static LOCAL_INSTALL: Mutex<()> = Mutex::new(());
 
 /// What an instance runs: its Minecraft version and its loader (`fabric`, `quilt`, `neoforge`,
 /// `forge`), none for vanilla.
@@ -15,6 +23,206 @@ const MAX_DEPTH: usize = 4;
 pub struct Target {
     pub minecraft: String,
     pub loader: Option<String>,
+}
+
+/// A local Java mod jar, identified from the loader metadata inside it. Reading this metadata
+/// never loads a class or runs code from the jar.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LocalMod {
+    pub loader: LoaderKind,
+    pub id: String,
+    pub name: String,
+    pub version: String,
+}
+
+/// Reads one small JSON file from a jar. Mod metadata is bounded so a malformed jar cannot make
+/// the launcher allocate an arbitrary amount of memory.
+fn jar_json(
+    jar: &mut zip::ZipArchive<fs::File>,
+    name: &str,
+) -> Result<Option<serde_json::Value>, String> {
+    if jar.index_for_name(name).is_none() {
+        return Ok(None);
+    }
+    let mut bytes = Vec::new();
+    jar.by_name(name)
+        .map_err(|e| format!("{name}: {e}"))?
+        .take(1 << 20)
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("{name}: {e}"))?;
+    serde_json::from_slice(&bytes)
+        .map(Some)
+        .map_err(|e| format!("{name}: {e}"))
+}
+
+fn field(value: &serde_json::Value, path: &[&str], what: &str) -> Result<String, String> {
+    let mut value = value;
+    for key in path {
+        value = &value[*key];
+    }
+    value
+        .as_str()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| format!("The mod's {what} is missing."))
+}
+
+/// Reads Fabric or Quilt metadata from an already-open jar. A multi-loader jar is treated as
+/// Quilt when it carries Quilt metadata, then as Fabric. Forge and NeoForge are named explicitly
+/// instead of being mistaken for ordinary archives.
+fn inspect_jar(jar: &mut zip::ZipArchive<fs::File>) -> Result<LocalMod, String> {
+    if let Some(json) = jar_json(jar, "quilt.mod.json")? {
+        let id = field(&json, &["quilt_loader", "id"], "Quilt mod id")?;
+        let version = field(&json, &["quilt_loader", "version"], "Quilt mod version")?;
+        let name = json["quilt_loader"]["metadata"]["name"]
+            .as_str()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&id)
+            .to_string();
+        return Ok(LocalMod {
+            loader: LoaderKind::Quilt,
+            id,
+            name,
+            version,
+        });
+    }
+    if let Some(json) = jar_json(jar, "fabric.mod.json")? {
+        let id = field(&json, &["id"], "Fabric mod id")?;
+        let version = field(&json, &["version"], "Fabric mod version")?;
+        let name = json["name"]
+            .as_str()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&id)
+            .to_string();
+        return Ok(LocalMod {
+            loader: LoaderKind::Fabric,
+            id,
+            name,
+            version,
+        });
+    }
+    if jar.index_for_name("META-INF/neoforge.mods.toml").is_some()
+        || jar.index_for_name("META-INF/mods.toml").is_some()
+    {
+        return Err(
+            "This is a Forge or NeoForge mod. Local JAR import currently supports Fabric and \
+             Quilt; Forge-family loader installation comes later."
+                .into(),
+        );
+    }
+    Err(
+        "This JAR has no fabric.mod.json or quilt.mod.json: it is not a Fabric or Quilt mod."
+            .into(),
+    )
+}
+
+fn open_local(file: &Path) -> Result<zip::ZipArchive<fs::File>, String> {
+    let opened = fs::File::open(file).map_err(|e| format!("{}: {e}", file.display()))?;
+    zip::ZipArchive::new(opened)
+        .map_err(|e| format!("{} is not a readable JAR: {e}", file.display()))
+}
+
+/// Inspects a local `.jar` without running anything from it.
+pub fn inspect_local(file: &Path) -> Result<LocalMod, String> {
+    if !file
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("jar"))
+    {
+        return Err(format!("{} is not a .jar file.", file.display()));
+    }
+    inspect_jar(&mut open_local(file)?)
+}
+
+/// Copies a local Fabric or Quilt mod into a Java instance. The loader must fit, another jar with
+/// the same mod id is refused, and an existing file is never overwritten silently.
+pub fn install_local(file: &Path, target: &Target, home: &Path) -> Result<LocalMod, String> {
+    let _serial = LOCAL_INSTALL.lock().unwrap_or_else(|e| e.into_inner());
+    target.folder(Kind::Mod)?;
+    let found = inspect_local(file)?;
+    if !target.accepts(found.loader.id()) {
+        return Err(format!(
+            "{} is a {} mod, but this instance uses {}.",
+            found.name,
+            found.loader.name(),
+            target.loader.as_deref().unwrap_or("no mod loader")
+        ));
+    }
+    let file_name = file
+        .file_name()
+        .and_then(|n| n.to_str())
+        .and_then(super::safe_name)
+        .ok_or_else(|| format!("{} is not a safe JAR file name.", file.display()))?;
+    // Java loaders conventionally scan the lowercase `.jar` suffix even on case-sensitive file
+    // systems. Inspection accepts `.JAR` from Windows, but installation normalizes it.
+    let file_name = format!("{}.jar", &file_name[..file_name.len() - ".jar".len()]);
+    let mods = home.join("mods");
+    let to = mods.join(&file_name);
+    if to.exists() {
+        return Err(format!(
+            "mods/{file_name} is already there. Remove it first to avoid replacing a mod silently."
+        ));
+    }
+    if let Ok(entries) = fs::read_dir(&mods) {
+        for path in entries.flatten().map(|e| e.path()).filter(|p| {
+            let name = p
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            name.ends_with(".jar") || name.ends_with(".jar.disabled")
+        }) {
+            let Ok(mut jar) = open_local(&path) else {
+                continue;
+            };
+            if let Ok(other) = inspect_jar(&mut jar) {
+                if other.id == found.id {
+                    return Err(format!(
+                        "{} is already installed as {}: remove the old JAR first.",
+                        found.name,
+                        path.file_name()
+                            .map(|n| n.to_string_lossy())
+                            .unwrap_or_default()
+                    ));
+                }
+            }
+        }
+    }
+    fs::create_dir_all(&mods).map_err(|e| format!("{}: {e}", mods.display()))?;
+    let part = mods.join(format!(".{file_name}.part"));
+    let _ = fs::remove_file(&part);
+    fs::copy(file, &part).map_err(|e| format!("{}: {e}", part.display()))?;
+    fs::rename(&part, &to)
+        .inspect_err(|_| {
+            let _ = fs::remove_file(&part);
+        })
+        .map_err(|e| format!("{}: {e}", to.display()))?;
+    let mut installed = Installed::load(home);
+    installed
+        .entries
+        .retain(|e| !(e.source == SourceId::Local && e.project == found.id));
+    installed.entries.push(Entry {
+        source: SourceId::Local,
+        project: found.id.clone(),
+        slug: found.id.clone(),
+        title: found.name.clone(),
+        kind: Kind::Mod,
+        version: format!("local:{}", found.version),
+        number: found.version.clone(),
+        file: format!("mods/{file_name}"),
+        checksum: "LOCAL".into(),
+        page: String::new(),
+        dependency: false,
+        verdict: None,
+        skipped: Vec::new(),
+        namespaces: Vec::new(),
+    });
+    installed.save(home).inspect_err(|_| {
+        let _ = fs::remove_file(&to);
+    })?;
+    Ok(found)
 }
 
 impl Target {

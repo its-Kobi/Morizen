@@ -120,6 +120,22 @@ fn says_what_a_dropped_file_is() {
             (p, Ok(Dropped::Instance))
         },
         {
+            let p = dir.join("fabric.jar");
+            zip_file(
+                &p,
+                &[(
+                    "fabric.mod.json",
+                    br#"{"schemaVersion":1,"id":"example","version":"1"}"#,
+                )],
+            );
+            (p, Ok(Dropped::JavaMod))
+        },
+        {
+            let p = dir.join("forge.jar");
+            zip_file(&p, &[("META-INF/mods.toml", b"modLoader='javafml'")]);
+            (p, Err(()))
+        },
+        {
             let p = dir.join("random.zip");
             zip_file(&p, &[("readme.txt", b"")]);
             (p, Err(()))

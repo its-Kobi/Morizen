@@ -9,10 +9,12 @@
 //!   modpack, for the Modpacks import (`modpacks::import`).
 //! - A zip with `pack.mcmeta`: a data pack (`data/`) or a resource pack; with `shaders/`, or a
 //!   `.hshader`: a shader pack.
+//! - A `.jar` with `fabric.mod.json` or `quilt.mod.json`: a local mod for the selected matching
+//!   Java instance. Its metadata is read, never its code.
 //!
 //! Only what an instance holds is taken from a shared zip ([`crate::export::FILES`],
 //! [`crate::export::FOLDERS`], `saves/`), and every path is checked to stay inside its folder.
-use crate::browser::{download, FileRef};
+use crate::browser::{download, java_instance, FileRef};
 use crate::export::{FILES, FOLDERS};
 use crate::instances::{self, Instance};
 use crate::packs;
@@ -35,6 +37,8 @@ pub enum Dropped {
     Pack(packs::Kind),
     /// A data pack: it goes into a world.
     DataPack,
+    /// A Fabric or Quilt mod jar, for the selected Java instance.
+    JavaMod,
 }
 
 fn open(file: &Path) -> Result<zip::ZipArchive<fs::File>, String> {
@@ -68,6 +72,10 @@ pub fn what(file: &Path) -> Result<Dropped, String> {
         .map(|e| e.to_string_lossy().to_ascii_lowercase());
     match ext.as_deref() {
         Some("hshader") => return Ok(Dropped::Pack(packs::Kind::Shader)),
+        Some("jar") => {
+            java_instance::inspect_local(file)?;
+            return Ok(Dropped::JavaMod);
+        }
         Some("mrpack") => {
             let index = read_index(&mut open(file)?)?;
             let loaders = index["dependencies"]
@@ -81,7 +89,8 @@ pub fn what(file: &Path) -> Result<Dropped, String> {
         Some("zip") => {}
         _ => {
             return Err(format!(
-                "{name} can't be imported: drop a .mrpack, a .zip or a .hshader."
+                "{name} can't be imported: drop a Fabric/Quilt .jar, a .mrpack, a .zip or a \
+                 .hshader."
             ))
         }
     }

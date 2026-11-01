@@ -2,6 +2,7 @@ use super::*;
 use crate::browser::{download, modrinth, FileRef, SourceId};
 use sha2::Digest;
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::PathBuf;
 
 /// A source in memory: projects, their versions (newest first), and the bytes each URL serves.
@@ -116,6 +117,17 @@ fn home(name: &str) -> PathBuf {
 }
 
 const NONE: &dyn Fn(&str, f32) = &|_, _| {};
+
+fn local_jar(path: &Path, files: &[(&str, &[u8])]) {
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let mut jar = zip::ZipWriter::new(fs::File::create(path).unwrap());
+    for (name, bytes) in files {
+        jar.start_file(*name, zip::write::SimpleFileOptions::default())
+            .unwrap();
+        jar.write_all(bytes).unwrap();
+    }
+    jar.finish().unwrap();
+}
 
 #[test]
 fn picks_the_newest_file_for_the_version_and_loader() {
@@ -319,4 +331,101 @@ fn the_page_search_keeps_the_players_filters_but_not_their_version() {
     assert!(!t.takes(Kind::Modpack) && !t.takes(Kind::Shader) && !t.takes(Kind::DataPack));
     assert_eq!(t.describe(Kind::Mod), "Minecraft 1.21.1 with fabric");
     assert_eq!(t.describe(Kind::ResourcePack), "Minecraft 1.21.1");
+}
+
+#[test]
+fn local_fabric_and_quilt_jars_are_read_without_running_them() {
+    let home = home("local-metadata");
+    let fabric = home.join("downloads/sodium.jar");
+    local_jar(
+        &fabric,
+        &[(
+            "fabric.mod.json",
+            br#"{"schemaVersion":1,"id":"sodium","version":"1.2.3","name":"Sodium"}"#,
+        )],
+    );
+    assert_eq!(
+        inspect_local(&fabric).unwrap(),
+        LocalMod {
+            loader: LoaderKind::Fabric,
+            id: "sodium".into(),
+            name: "Sodium".into(),
+            version: "1.2.3".into(),
+        }
+    );
+
+    let quilt = home.join("downloads/qsl.jar");
+    local_jar(
+        &quilt,
+        &[(
+            "quilt.mod.json",
+            br#"{"quilt_loader":{"id":"qsl","version":"9.0","metadata":{"name":"Quilt Standard Libraries"}}}"#,
+        )],
+    );
+    assert_eq!(inspect_local(&quilt).unwrap().loader, LoaderKind::Quilt);
+
+    let forge = home.join("downloads/forge.jar");
+    local_jar(&forge, &[("META-INF/mods.toml", b"modLoader='javafml'")]);
+    assert!(inspect_local(&forge)
+        .unwrap_err()
+        .contains("Forge or NeoForge"));
+    let _ = fs::remove_dir_all(home);
+}
+
+#[test]
+fn local_jars_go_only_to_a_matching_java_instance_without_overwriting() {
+    let home = home("local-install");
+    let downloads = home.join("downloads");
+    let fabric = downloads.join("map.jar");
+    local_jar(
+        &fabric,
+        &[(
+            "fabric.mod.json",
+            br#"{"schemaVersion":1,"id":"map","version":"1","name":"Map"}"#,
+        )],
+    );
+    let installed = install_local(&fabric, &target("1.21.1", Some("fabric")), &home).unwrap();
+    assert_eq!(installed.id, "map");
+    assert!(home.join("mods/map.jar").is_file());
+    let listed = Installed::load(&home);
+    assert_eq!(listed.entries.len(), 1);
+    assert_eq!(listed.entries[0].source, SourceId::Local);
+    assert!(
+        install_local(&fabric, &target("1.21.1", Some("fabric")), &home)
+            .unwrap_err()
+            .contains("already there")
+    );
+
+    let duplicate = downloads.join("another-map.jar");
+    local_jar(
+        &duplicate,
+        &[(
+            "fabric.mod.json",
+            br#"{"schemaVersion":1,"id":"map","version":"2","name":"Map"}"#,
+        )],
+    );
+    assert!(
+        install_local(&duplicate, &target("1.21.1", Some("fabric")), &home)
+            .unwrap_err()
+            .contains("already installed")
+    );
+
+    let quilt = downloads.join("quilt-only.jar");
+    local_jar(
+        &quilt,
+        &[(
+            "quilt.mod.json",
+            br#"{"quilt_loader":{"id":"quilt_only","version":"1"}}"#,
+        )],
+    );
+    assert!(
+        install_local(&quilt, &target("1.21.1", Some("fabric")), &home)
+            .unwrap_err()
+            .contains("uses fabric")
+    );
+    assert!(install_local(&quilt, &target("1.21.1", Some("quilt")), &home).is_ok());
+    assert!(install_local(&fabric, &target("1.21.1", None), &home)
+        .unwrap_err()
+        .contains("vanilla Minecraft"));
+    let _ = fs::remove_dir_all(home);
 }
