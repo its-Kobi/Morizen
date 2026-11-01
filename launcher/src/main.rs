@@ -106,7 +106,6 @@ impl Page {
 enum SelfUpdate {
     Idle,
     Downloading(String, f32),
-    Ready(String),
     Failed(String),
 }
 
@@ -537,10 +536,7 @@ impl Launcher {
 
     fn update_launcher(&mut self, release: Release) {
         if !backend::self_update_allowed()
-            || matches!(
-                self.self_update,
-                SelfUpdate::Downloading(..) | SelfUpdate::Ready(_)
-            )
+            || matches!(self.self_update, SelfUpdate::Downloading(..))
         {
             return;
         }
@@ -838,9 +834,6 @@ impl Launcher {
                     if self.settings.auto_install() {
                         self.install_update();
                     }
-                    if let Some(release) = self.updates.launcher.clone() {
-                        self.update_launcher(release);
-                    }
                 }
                 Msg::Updates(Err(e)) => self.update_error = Some(e),
                 Msg::NativeProgress(step) => self.native_step = Some(step),
@@ -858,12 +851,11 @@ impl Launcher {
                     }
                 }
                 Msg::LauncherUpdated(result) => {
-                    let version = match &self.self_update {
-                        SelfUpdate::Downloading(v, _) => v.clone(),
-                        _ => String::new(),
-                    };
                     self.self_update = match result {
-                        Ok(()) => SelfUpdate::Ready(version),
+                        // `restart` does not return on success: Unix execs the new launcher;
+                        // Windows starts it and exits this process. Only a restart failure is
+                        // shown, with no second confirmation after a successful update.
+                        Ok(()) => SelfUpdate::Failed(backend::restart()),
                         Err(e) => SelfUpdate::Failed(e),
                     };
                 }
@@ -2157,26 +2149,34 @@ impl Launcher {
                         .child(div().flex().child(progress_bar(Some((*f, *f)), &t))),
                 )
             }
-            SelfUpdate::Ready(version) => {
-                foot = foot.child(
-                    blocks::panel(&t)
-                        .flex()
-                        .flex_col()
-                        .gap(px(8.))
-                        .p(px(10.))
-                        .mb(px(6.))
-                        .child(
-                            blocks::pixel(13., FontWeight::MEDIUM)
-                                .text_color(t.ink)
-                                .child(format!("Launcher updated to {version}")),
-                        )
-                        .child(button("restart", "Restart", Kind::Primary, &t).on_click(
-                            cx.listener(|this, _: &ClickEvent, _, cx| {
-                                this.self_update = SelfUpdate::Failed(backend::restart());
-                                cx.notify();
-                            }),
-                        )),
-                )
+            SelfUpdate::Idle if backend::self_update_allowed() => {
+                if let Some(release) = self.updates.launcher.clone() {
+                    let version = backend::launcher_version(&release.tag)
+                        .unwrap_or_default()
+                        .to_string();
+                    let available = trf("{version} available", &[("version", &version)]);
+                    foot = foot.child(
+                        blocks::panel(&t)
+                            .flex()
+                            .flex_col()
+                            .gap(px(8.))
+                            .p(px(10.))
+                            .mb(px(6.))
+                            .child(
+                                blocks::pixel(13., FontWeight::MEDIUM)
+                                    .text_color(t.ink)
+                                    .child(format!("Launcher · {available}")),
+                            )
+                            .child(
+                                button("launcher-update", "Update", Kind::Primary, &t).on_click(
+                                    cx.listener(move |this, _: &ClickEvent, _, cx| {
+                                        this.update_launcher(release.clone());
+                                        cx.notify();
+                                    }),
+                                ),
+                            ),
+                    )
+                }
             }
             _ => {}
         }
@@ -3131,10 +3131,6 @@ impl Launcher {
                 );
                 format!("{}  ·  {said}", backend::VERSION)
             }
-            SelfUpdate::Ready(v) => trf(
-                "Updated to {version}. Restart the launcher to use it.",
-                &[("version", v)],
-            ),
             SelfUpdate::Failed(e) => format!(
                 "{}  ·  {}",
                 backend::VERSION,
@@ -3159,14 +3155,19 @@ impl Launcher {
             },
         };
         let launcher_action = match &self.self_update {
-            SelfUpdate::Ready(_) => Some(
-                button("restart-settings", "Restart", Kind::Secondary, &t)
-                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                        this.self_update = SelfUpdate::Failed(backend::restart());
-                        cx.notify();
-                    }))
-                    .into_any_element(),
-            ),
+            SelfUpdate::Idle | SelfUpdate::Failed(_)
+                if backend::self_update_allowed() && self.updates.launcher.is_some() =>
+            {
+                let release = self.updates.launcher.clone().unwrap();
+                Some(
+                    button("update-launcher", "Update", Kind::Secondary, &t)
+                        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            this.update_launcher(release.clone());
+                            cx.notify();
+                        }))
+                        .into_any_element(),
+                )
+            }
             SelfUpdate::Downloading(..) => None,
             _ => Some(
                 button("check", "Check now", Kind::Ghost, &t)
