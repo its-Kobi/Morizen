@@ -1,0 +1,501 @@
+# Java mod bridge: embedded Fabric in native Morizen
+
+Status: **Phase 0 design and evidence** (2026-11-01). No Java mod runs in the Rust engine yet.
+The implementation is developed only on `feature/java-mod-bridge` and is off unless the game is
+built with Cargo feature `java-mods`.
+
+## Goal and hard boundary
+
+The bridge hosts one Java 25 VM inside the Morizen process, runs the real Fabric Loader with a
+Morizen game provider, and presents JVM classes with the names and descriptors that 26.3 Fabric
+mods expect. Those classes delegate supported operations to Rust. The real Minecraft Java client
+is never started or put on the runtime class path.
+
+This is not the launcher's existing Java-instance support. Java instances run Mojang's game in a
+separate process. The bridge runs mod code beside the native Rust engine.
+
+The following are non-negotiable:
+
+- no Mojang class implementation, asset, jar, decompiled source or generated shim is committed;
+- shim generation reads only the user's own 26.3 class signatures and writes under `.local/`;
+- all Rust integration is behind `java-mods`, which is off by default;
+- with `java-mods` off there is no JVM lookup, thread, branch, JNI dependency in the linked game,
+  mod scan or change in behaviour;
+- an unsupported bridge member throws `UnsupportedCompatException` and is reported once;
+- Fabric, Mixin and mods are untrusted native-process code. The bridge can isolate ordinary Java
+  exceptions, but cannot honestly promise process isolation (see [Security limits](#security-limits)).
+
+## Phase 0 evidence
+
+### Minecraft 26.3 uses Mojang's unobfuscated names
+
+**Answer:** 26.3 Fabric mods are built against the named `net.minecraft.*` classes and named
+members shipped by Mojang, not `class_1234` intermediary names. The bridge runtime namespace must
+therefore be `named` and no Tiny/Yarn/intermediary remap belongs in the 26.3 path.
+
+Evidence:
+
+1. [`version-ports.md`](version-ports.md#prepare) records that releases since 26.1 ship
+   unobfuscated. The preparation pipeline stops if a candidate contains `client_mappings` or
+   `server_mappings`; 26.3 passed that gate.
+2. Fabric's 26.2 loader documentation says mappings are relevant only for obfuscated pre-26.1
+   games. Fabric Loader does not remap mods to an arbitrary runtime namespace: released mods must
+   already match it.
+3. The repository's 26.3 benchmark mod compiles directly against the user's client jar and imports
+   `net.minecraft.client.Minecraft`; its Mixin injects into named method `runTick`.
+4. A signature-only scan of the five hash-pinned, released 26.3 Fabric artifacts in
+   `tools/benchmark-deps/mods.lock.json` found the following unique class references:
+
+   | Artifact | Named `net/minecraft/...` | Intermediary `class_N` |
+   |---|---:|---:|
+   | Fabric API 0.161.0+26.3 (44 nested modules) | 1,125 | 0 |
+   | Sodium 0.9.2 | 303 | 0 |
+   | Lithium 0.26.2 | 406 | 0 |
+   | ImmediatelyFast 1.17.1 | 70 | 0 |
+   | FerriteCore 9.0.0 | 28 | 0 |
+
+The official 26.3 client jar is not installed on this workstation, so Phase 0 did not perform a new
+direct jar inventory here. The evidence above comes from the repository's already validated version
+pipeline, its compile-and-run benchmark path, Fabric's documentation, and released mod class
+signatures. `tools/gen_compat` must still refuse generation unless the local jar matches
+`research-lock.json`'s 26.3 SHA-1 and has no mapping downloads.
+
+### What Fabric mods expect
+
+For 26.3, a production mod jar's own classes use the named namespace. `fabric.mod.json` still
+declares loader and Minecraft version constraints, entrypoint keys, Mixin configurations, nested
+jars and an optional class tweaker/access widener. Fabric Loader is responsible for discovery,
+dependency solving, nested jars, side selection, language adapters and creating entrypoints.
+Morizen must not reimplement those pieces.
+
+The bridge advertises two built-in mods to Fabric:
+
+- `minecraft` version `26.3`, so ordinary `depends.minecraft` constraints resolve;
+- `morizen` at the native client version, so bridge-aware mods can detect the host.
+
+`MorizenGameProvider.getGameId()` returns `minecraft` for loader/mapping compatibility and
+`getGameName()` returns `Morizen`. Its runtime and default distribution namespaces are `named`.
+
+### Fabric Loader contract (pinned 0.19.5)
+
+`tools/benchmark-deps/fabric.lock.json` pins Fabric Loader 0.19.5 and all of its runtime libraries by
+SHA-256. Phase 0 downloaded those public artifacts to ignored `.local/runtime/fabric/` and inspected
+class signatures with JDK 25 `javap`; no Fabric source was read or copied.
+
+The current `net.fabricmc.loader.impl.game.GameProvider` is an internal, version-specific interface.
+It is discovered through Java `ServiceLoader` from
+`META-INF/services/net.fabricmc.loader.impl.game.GameProvider`. In 0.19.5 its required surface is:
+
+- identity/version: `getGameId`, `getGameName`, `getRawGameVersion`,
+  `getNormalizedGameVersion`, `getBuiltinMods`;
+- launch shape: `getEntrypoint`, `getLaunchDirectory`, `requiresUrlClassLoader`, `isEnabled`;
+- discovery/setup: `locateGame(FabricLauncher, String[])`, `initialize(FabricLauncher)`,
+  `getEntrypointTransformer`, `unlockClassPath(FabricLauncher)`;
+- execution/arguments: `launch(ClassLoader)`, `getArguments`, `getLaunchArguments(boolean)`;
+- transforms/namespaces: `getBuiltinTransforms(String)` plus defaults for runtime namespace,
+  distribution namespace, error GUI and AWT support.
+
+This differs from old examples (there is no `isObfuscated` method in 0.19.5). The Java provider is
+compiled against exactly the pinned loader and an integration test reflects over the interface so a
+loader bump cannot silently change the contract.
+
+Provider bootstrap:
+
+1. `morizen-jvm` starts `KnotClient` on the dedicated JVM/mod thread.
+2. The provider service is on the parent class path. Mojang's client jar is absent, so Fabric's
+   bundled Minecraft provider cannot locate a game; `MorizenGameProvider` must be the enabled
+   provider that succeeds. The test asserts the selected provider id before loading a mod.
+3. `locateGame` validates the game directory, local shim jar and mod paths passed by Rust.
+4. `getBuiltinMods` uses Fabric's `BuiltinModMetadata.Builder` for `minecraft` and `morizen`.
+5. `unlockClassPath` adds only the locally generated shim jar to Knot's target class loader. It is
+   deliberately absent from the parent class path.
+6. `launch(ClassLoader)` loads `dev.morizen.compat.Bootstrap` through the supplied Knot loader.
+7. Bootstrap establishes the target context class loader, initializes loader entrypoints and hands
+   the target loader back to Rust as a JNI global reference.
+
+The old public Fabric integration guide calls `Hooks.startClient` to prepare and invoke `main` and
+`client` entrypoints. That class is internal. `compat-java` isolates this call in one adapter covered
+by the loader-contract test; mod-facing code uses only Fabric's public `FabricLoader` and initializer
+interfaces. A loader upgrade is its own small phase.
+
+### Mixin and class tweaker behaviour
+
+Fabric 0.19.5's Knot loader owns the transforming class loader. Signature inspection shows that it
+loads raw class bytes, applies pre-Mixin transforms/class tweakers, then delegates to Mixin's
+`IMixinTransformer` before defining a class. Mixin's documentation confirms that target bytecode
+must be transformed before the JVM defines the target class.
+
+Therefore every targetable shim class must be loaded by Knot, not the JVM parent loader. Mixin can
+then patch that JVM class normally. It never patches Rust machine code.
+
+The shim method itself must contain ordinary bytecode that calls a separate native bridge method:
+
+```java
+// Generated locally from the user's class signature.
+public BlockState defaultBlockState() {
+    return NativeBridge.blockDefaultState(this.morizen$handle);
+}
+```
+
+It must **not** merely declare the target method `native`: boundary injections need a Code attribute
+and instructions to transform.
+
+Compatibility by injection kind:
+
+| Mixin use | Expected bridge support |
+|---|---|
+| `HEAD`, normal return/tail callbacks | Feasible when the exact target method exists in the shim |
+| accessors, invokers, `@Shadow`, interface injection, access wideners | Feasible once fields/methods and hierarchy are represented |
+| full overwrite | Feasible only when all APIs reached by the replacement body are supported |
+| redirect/modify an invocation or field | Not generic: the delegate wrapper does not contain vanilla's instruction sequence |
+| local capture, `ModifyVariable`, `ModifyConstant`, slices and ordinal-sensitive injections | Not generic: shim locals/constants/ordinals differ from vanilla |
+| constructor injection | Partial: generated constructors cannot reproduce vanilla constructor bytecode |
+
+This is the largest compatibility limit. Shipping signatures cannot reproduce vanilla method
+instruction patterns without shipping Mojang code. Phase 6 must translate high-value
+instruction-sensitive Mixins to explicit bridge hooks one module/mod at a time and report the rest;
+it must never claim arbitrary Mixins are supported.
+
+## Repository layout and feature fence
+
+Planned tracked layout:
+
+```text
+crates/morizen-jvm/       JVM discovery, invocation, JNI adapters, mod thread
+crates/morizen-compat/    pure Rust handles, batched requests/actions, report and ledger types
+compat-java/              committed provider/bootstrap/native declarations and test-mod sources
+  src/main/java/dev/morizen/compat/
+  src/main/resources/META-INF/services/...
+  test-mods/empty/
+tools/gen_compat/         local signature reader and shim emitter
+tools/compat_ledger.py    status/report tool
+docs/java-mod-bridge.md   this design and phase results
+```
+
+Local/generated layout (all ignored and rejected by public-tree checks if accidentally staged):
+
+```text
+.local/java-mod-bridge/
+  deps/                   hash-pinned Fabric/Mixin jars
+  signatures/26.3.json    class/member signatures from the user's jar
+  generated-src/          generated net.minecraft.* Java stubs
+  generated-classes/
+  morizen-shims.jar
+  test-runs/<name>/
+```
+
+`horizon-client` gets optional dependencies on `morizen-jvm` and `morizen-compat` and one feature:
+
+```toml
+java-mods = ["dep:morizen-jvm", "dep:morizen-compat"]
+```
+
+Every engine field, module, startup call and hook is inside `#[cfg(feature = "java-mods")]`. The
+feature is absent from `default`, release and server feature sets until a maintainer explicitly
+changes that. Acceptance requires comparing a clean feature-off client build with the base commit:
+the executable hash and parity selection must be unchanged. No no-op runtime branch is acceptable.
+
+`morizen-compat` has no dependency on `horizon-client`, preventing a cycle. It owns neutral DTOs and
+numeric handles. The client maps those batches to engine resources at narrow feature-gated seams.
+`morizen-jvm` depends on `morizen-compat` and `jni`, and converts JNI values to those DTOs.
+
+## Local shim generation
+
+`tools/gen_compat` takes the user's exact 26.3 client jar and:
+
+1. checks the jar SHA-1 against `research-lock.json`;
+2. rejects a manifest with mapping downloads (the 26.3 path is named);
+3. reads class access, hierarchy, interfaces, field names/descriptors/access and method
+   names/descriptors/access/exceptions;
+4. records nest/inner-class, record, enum and permitted-subclass shape needed by the JVM verifier;
+5. does **not** read or emit method Code attributes, assets or implementation constants;
+6. emits exact skeletons under `.local/java-mod-bridge/generated-src`;
+7. gives a member a delegating body only when the tracked compatibility binding table supports it;
+   every other callable body throws
+   `UnsupportedCompatException("net.minecraft.Class.method(descriptor)")`;
+8. compiles the generated source with the user's JDK 25 and packages `morizen-shims.jar` locally.
+
+The existing `tools/class_index.py` is evidence that the repository can parse signatures, but the
+generator gets a separate signatures-only reader: it must not hash, retain or inspect method code.
+Generated source, signature inventories and jars never enter Git. Public CI cannot build shims and
+must run only feature-off checks; the trusted local compatibility runner generates them from its own
+copy before feature-on tests.
+
+This has a distribution consequence: a public Morizen release cannot contain generated Mojang shim
+classes under this policy. During these phases `java-mods` is a local, source-built experimental
+feature. Shipping it needs a separate legal/distribution decision; implementation work must not
+quietly change that boundary.
+
+## Embedded JVM design
+
+### Crate and JDK
+
+Use `jni = 0.22.4` with feature `invocation`. It supports the workspace's Rust 1.85 floor and
+dynamically loads `jvm.dll`, `libjvm.so` or `libjvm.dylib`. Phase 1 accepts an explicit JDK home,
+then `MORIZEN_JAVA_HOME`, then `JAVA_HOME`; it requires major 25 and reports the detected `release`
+file. It does not bundle or download Java.
+
+Use `JavaVM::with_libjvm` with the platform's explicit server-VM path. On Windows, the JDK `bin`
+directory must also be on the DLL search path before loading `jvm.dll`. VM arguments include a
+bounded heap, the provider/Fabric parent class path, UTF-8, headless AWT and bridge paths as system
+properties. Unknown options are errors.
+
+### One VM, one owner thread
+
+The JNI Invocation API supports only one VM per process. Morizen creates it once on a dedicated OS
+thread named `Java mods`; this is the logical Java game/mod thread for the life of the process.
+`JNIEnv` never crosses threads.
+
+```text
+Morizen game/server threads             Java mods thread
+---------------------------             ----------------
+snapshot/event batch  ───────────────►  channel → JNI dispatcher → Fabric callbacks
+engine stays unborrowed                 Java/native calls append compat actions
+apply action batch      ◄──────────────  one reply after the callback batch
+```
+
+The game does not call into Java while holding world/chunk/resource locks. Each tick or lifecycle
+point sends an immutable batch and later applies a bounded result batch. Registration is a distinct
+startup transaction that commits only if every id and property validates.
+
+Mods may create their own Java threads. A native method invoked there receives that call's `JNIEnv`,
+but may only enqueue thread-safe requests; it cannot borrow `Game`. Rust-originated calls use cached
+global class/object references and cached method/field IDs. Attached native threads have the
+bootstrap context loader by default, so class lookup never relies on `FindClass` from an arbitrary
+Rust thread: Bootstrap supplies Knot's target loader as a global reference.
+
+### Exceptions and shutdown
+
+After each Rust-to-Java call, `morizen-jvm` checks for a pending exception, extracts class, message
+and a bounded stack through the Java bootstrap helper, clears it and returns a Rust `JavaError`.
+Rust native entrypoints use `catch_unwind`; no panic crosses JNI. A failure becomes a Java bridge
+exception associated with the current mod/event.
+
+Shutdown order:
+
+1. stop accepting event batches;
+2. dispatch Fabric/Morizen stop callbacks with a deadline;
+3. ask bridge-owned executors to stop and join the Java mod thread;
+4. drop every JNI local/global reference and attachment guard;
+5. call `DestroyJavaVM` only when no Java non-daemon thread remains.
+
+`DestroyJavaVM` waits for non-daemon threads and the JNI spec permits only one VM. A mod that leaves
+a non-daemon thread alive can otherwise hang shutdown. The first implementation reports that mod and
+lets process exit reclaim the VM after a short deadline rather than blocking Morizen forever. It
+never attempts to destroy and recreate a VM in one process.
+
+## JNI bridge: handles and batches
+
+Java objects that represent Rust-owned game objects carry opaque nonzero `long` handles. A handle is
+`(generation, slot)`; stale/world-after-close handles fail cleanly. Java never receives a Rust
+pointer. Global registries use stable numeric ids plus resource names.
+
+JNI calls are coarse:
+
+- registry transaction: arrays of block/item descriptors and one result array;
+- tick/lifecycle batch: compact primitive arrays or direct read-only buffers;
+- world reads: batched positions/ids, never one JNI call per block;
+- actions: one bounded command buffer returned after an event batch;
+- asset handoff: paths and metadata once during resource loading, not bytes per frame.
+
+Method/class IDs and global references are cached after bootstrap. Local frames bound temporary JNI
+references. Strings are converted at batch boundaries only. No Java callback is made per entity,
+block, draw call or mesh vertex.
+
+## Compatibility API and engine seams
+
+The Java surface has three layers:
+
+1. exact generated `net.minecraft.*` signatures;
+2. committed clean-room Fabric API compatibility classes, one module at a time;
+3. `dev.morizen.compat.NativeBridge`, the small registered-native ABI.
+
+The Rust surface in `morizen-compat` begins with:
+
+- resource ids, registry transactions, block/item property DTOs;
+- asset/data roots contributed by each mod;
+- immutable lifecycle/event snapshots and bounded actions;
+- handle tables and unsupported-call reporting.
+
+Initial engine seams reuse existing code instead of creating parallel registries:
+
+- registry output is converted to the content declarations already consumed by
+  `horizon-client::mod_content` before `load_resources` builds `BlockFacts`, `Items`, creative tabs,
+  recipes and pack models;
+- a mod's `assets/` and `data/` are mounted through the existing content/resource root overlay;
+- later event calls attach to the stable, empty native hook points in `game/native_hooks.rs`, each
+  still compiled out completely without `java-mods`.
+
+Phase 2 must start the registration transaction before `game/startup_menu.rs::spawn_loader` calls
+`mods::content_root`; once `Resources` is built, registry mutation is refused until a full resource
+reload creates a new generation.
+
+## Unsupported calls and compatibility report
+
+Every generated unsupported body calls a single Java helper which:
+
+1. identifies the active mod/entrypoint when known;
+2. records `(mod id, class, member descriptor, phase)` in `morizen-compat`;
+3. increments a count but logs the same key only once;
+4. throws `UnsupportedCompatException` with the exact member.
+
+The bridge writes `java-mods/compat-report.json` atomically in the game directory:
+
+```json
+{
+  "schema": 1,
+  "minecraft": "26.3",
+  "loader": { "id": "fabric", "version": "0.19.5" },
+  "mods": [{
+    "id": "example", "version": "1.0.0", "status": "partial",
+    "unsupported": [{
+      "member": "net.minecraft.world.level.Level.getBlockState(BlockPos)",
+      "phase": "main", "calls": 4
+    }]
+  }]
+}
+```
+
+An exception during one initializer or callback disables that mod's bridge callbacks and leaves
+Morizen running. A required Mixin configuration that cannot apply can abort the Java loader before
+an individual mod is attributable; that disables the whole Java-mod session, reports the Mixin
+error and starts/continues native Morizen without Java mods.
+
+## API-area priority from the 26.3 corpus
+
+Phase 0 scanned class-name references and metadata only (not source or method bodies) in the five
+hash-pinned benchmark artifacts. This is a performance-oriented corpus, not a claim about all mods,
+but it gives a reproducible first priority signal:
+
+| Rank | Area | Artifacts referencing it (of 5) | First phase | Notes |
+|---:|---|---:|---:|---|
+| 1 | blocks/world and item/components | 5 | 2/4 | Also the base for ordinary content mods |
+| 2 | registries/resources/ids | 4 | 2 | Needed before Fabric registration can commit |
+| 3 | lifecycle/events | 4 | 3 | Loader init plus ticks, joins and interaction |
+| 4 | networking | 4 | 5 | Many client mods reference vanilla packet classes even without custom payloads |
+| 5 | entities | 3 | 4 | Lithium alone references 111 entity classes |
+| 6 | rendering and screens/GUI | 3 | 5/6 | Sodium has 211 rendering and 63 GUI class references |
+| 7 | NBT/data | 3 | 4 | Item stacks, entities and persistent data |
+| 8 | commands | 3 | 3 | Usually a small surface once Brigadier wrappers exist |
+| 9 | sounds | 2 | 5 | Lower frequency in this corpus |
+
+Mixin/class-tweaker pressure is high: Fabric API has 59 Mixin configs and 33 access wideners;
+Sodium 12/8, FerriteCore 5/0, ImmediatelyFast 2/1 and Lithium 2/1. This is why Phase 1 proves only
+loader/entrypoints and Phase 2 deliberately uses a purpose-built no-Mixin registry mod. The first
+real-mod trials after each phase use the pinned five plus 1-2 content mods relevant to that phase;
+failures are results, never silently excluded.
+
+## Compatibility ledger
+
+`tools/compat_ledger.py` is added in Phase 1 with a tracked area manifest and test-mod evidence.
+Statuses are:
+
+- **supported**: every committed test mod for the area passes and no member in its declared surface
+  throws unsupported;
+- **partial**: the manifest lists supported and unsupported members explicitly;
+- **unsupported**: no stable bridge contract yet.
+
+The percentage is supported member weight divided by all inventoried member weight in the pinned
+test/real-mod corpus. Partial areas contribute only their supported members, never an arbitrary
+half-credit. Adding a newly observed API expands the denominator, so the score may fall honestly.
+The ledger prints the evidence test and phase for every supported area.
+
+## Phase gates and demos
+
+### Phase 1 — JVM, real Fabric Loader, empty entrypoint
+
+Deliver both Rust crates, the committed provider/bootstrap, hash-pinned local dependency preparation,
+JDK 25 boot/shutdown, real Fabric discovery and `main`/`client` entrypoints, exception conversion and
+an empty report. `compat-java/test-mods/empty` writes a deterministic marker. Its headless log must
+name the JDK, selected provider, Loader 0.19.5, mod id/version, entrypoint begin/end and shutdown. No
+`net.minecraft` shim is needed yet.
+
+| Phase | Required demo and gate |
+|---:|---|
+| 2 | Generated local shims; one block/item appear in registries, creative inventory and world with translation/model/texture. Feature-off probe is byte-identical to base. |
+| 3 | Start/stop, batched ticks, join/leave, interaction and commands; prove order, thread, bounds, exception isolation and no callback after stop. |
+| 4 | Handle-backed world, state, entity, stack, NBT/components; stale handles fail and differential snapshots/actions match Java. |
+| 5 | Payloads, screens/GUI/render, sound, recipes and loot; high-frequency paths pass call-budget tests. |
+| 6 | One Fabric API module or Mixin pattern per change, with transformed-shim and engine tests; instruction-sensitive gaps stay reported. |
+| 7 | Quilt gets provider/entrypoint tests; NeoForge/Forge each require a new bootstrap/event/mapping design before code. |
+
+## Test layout
+
+Test mods under `compat-java/test-mods/` are `empty`, `registry`, `lifecycle`, `world`,
+`network-ui` and one `mixin-*` per injection/access pattern.
+
+Each runner uses fresh `HORIZON_HOME`, `XDG_*` and launcher homes under the approved temp folder.
+No real player data is written. Feature-off tests run first, feature-on tests second. Optional
+vanilla comparison runs use the player's own prepared jar and never publish it or generated shims.
+
+Each phase reports exact commands/counts, demo log, feature-off/on results, scratch-home manual steps,
+and 3-5 pinned real mods as `loaded`, `partial`, `unsupported` or `loader failure` with the first gap.
+
+## Security limits
+
+An in-process JVM is not a sandbox. A Java mod can use files, network, processes, reflection,
+`Unsafe`, native libraries and `System.exit`; a JNI/JVM/native-library fault can terminate or corrupt
+the Rust process. Java's removed SecurityManager cannot provide the isolation Morizen's old
+WebAssembly runtime did. The launcher must eventually show an explicit native-code trust warning,
+but launcher work is forbidden until Phase 2 passes.
+
+The bridge guarantees only that unsupported methods throw, Rust panics do not cross JNI, ordinary
+Java exceptions are reported, handles/actions are validated and bounded, and no JVM call occurs
+while the engine is mutably borrowed or holds a world lock.
+
+If process isolation becomes a requirement, an out-of-process JVM with IPC is the defensible design,
+but that is a different architecture and is not silently substituted here.
+
+## Main risks and open decisions
+
+1. **Mixin bytecode mismatch:** Phase 6 translates selected patterns, not arbitrary Mixins.
+2. **Generated-shim distribution:** public shipping needs a separate legal decision.
+3. **Provider instability:** pin 0.19.5 and reflect-test its internal interface.
+4. **Fabric API breadth:** 44 modules, 59 Mixin configs and 1,125 named game class references.
+5. **Threading/deadlocks:** queue all work; Java never holds `Game`.
+6. **Registry timing:** finish before `load_resources`; later changes require full reload.
+7. **Client/server ownership:** one JVM session per process with explicit logical sides.
+8. **Shutdown:** non-daemon mod threads require a deadline and report.
+9. **Native crash risk:** unavoidable in-process; never describe this as a sandbox.
+
+## Phase 0 reproduction record
+
+Evidence gathered on Windows with JDK `25.0.5.0.2`:
+
+```text
+python tools/runtime.py-equivalent fabric_libraries()
+  -> downloaded/verified Fabric Loader 0.19.5, Mixin 0.8.7 and ASM 9.10.1 under .local/
+javap -p net.fabricmc.loader.impl.game.GameProvider
+  -> provider method contract recorded above
+javap -p net.fabricmc.loader.impl.launch.knot.KnotClassDelegate
+javap -p org.spongepowered.asm.mixin.transformer.IMixinTransformer
+  -> Knot pre/post-Mixin transformation boundary recorded above
+signature-only scan of tools/benchmark-deps/mods.lock.json artifacts
+  -> named/intermediary and API-area tables recorded above
+```
+
+Sources used as documentation/API evidence:
+
+- [Fabric Loader documentation](https://docs.fabricmc.net/develop/loader/) and its [custom-application/GameProvider guide](https://wiki.fabricmc.net/documentation:fabric_loader)
+- [Mixin environment documentation](https://github.com/SpongePowered/Mixin/wiki/Introduction-to-Mixins---The-Mixin-Environment)
+- [JDK 25 JNI Invocation API](https://docs.oracle.com/en/java/javase/25/docs/specs/jni/invocation.html)
+- [`jni` crate 0.22.4](https://docs.rs/crate/jni/0.22.4), feature `invocation`
+- local repository evidence named throughout this document
+
+No Fabric/Mixin mod or loader source was read, translated or copied. Only published documentation,
+metadata, hashes, service resources and class/member signatures were inspected.
+
+### Phase 0 checks actually run
+
+| Command | Result |
+|---|---|
+| `py -3 tools/check_public_tree.py` | passed |
+| `py -3 -m unittest tests.test_runtime tests.test_class_index tests.test_lab` | 29 passed |
+| `cargo check -p horizon-core` | passed |
+| `cargo test -p horizon-core --lib` | 108 passed, 2 ignored, 1 failed: `jmath::tests::matches_hotspot_on_aarch64` differed by one bit on Windows x86_64 GNU |
+| `cargo test -p horizon-core --lib -- --skip jmath::tests::matches_hotspot_on_aarch64` | 108 passed, 2 ignored, 1 filtered |
+| `cargo check -p horizon-client --no-default-features` | blocked before checking the client: `ring` could not find `gcc.exe` in this Windows GNU toolchain |
+| `py -3 tools/pr_ready.py --quick --base main` | public tree passed; no Rust crate was selected; the repository-wide Python suite ran 423 tests with 12 skipped and failed one pre-existing check, `test_readme_percentage_matches_table`, because the root `README.md` has no parity heading |
+
+Phase 0 has no runtime mod demo: its deliverable is this design and reproducible provider/mapping
+evidence. Phase 1 is not started until this document is committed.
