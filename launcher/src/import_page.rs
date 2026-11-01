@@ -1,8 +1,10 @@
 //! Files dropped anywhere on the window (`horizon_launcher::import`): a shared instance becomes
 //! a new instance, a Java modpack goes to the Modpacks import, a resource or shader pack into
-//! the selected instance. The Packs section and the world rows take their own drops first.
+//! the selected instance, and a Fabric/Quilt jar goes to a matching Java instance. The Packs
+//! section and the world rows take their own drops first.
 use super::*;
 use gpui::ExternalPaths;
+use horizon_launcher::browser::java_instance;
 use horizon_launcher::import::{self, Dropped};
 use std::path::PathBuf;
 
@@ -50,6 +52,7 @@ impl Launcher {
                          one from there."
                     )))
                 }
+                Ok(Dropped::JavaMod) => self.import_java_mod(file, cx),
             }
         }
     }
@@ -76,6 +79,45 @@ impl Launcher {
         .detach();
     }
 
+    fn import_java_mod(&mut self, file: PathBuf, cx: &mut Context<Self>) {
+        let Some(instance) = self.selected_instance().cloned() else {
+            return;
+        };
+        let Some(java) = instance.java.as_ref() else {
+            self.importing.note = Some(Err(
+                "A Java mod JAR cannot run in Morizen's Rust game. Select a Fabric or Quilt \
+                 Java instance first."
+                    .into(),
+            ));
+            return;
+        };
+        let target = java.target();
+        let (home, instance_name) = (instance.home, instance.name);
+        self.importing.busy += 1;
+        self.importing.note = None;
+        let task = cx
+            .background_executor()
+            .spawn(async move { java_instance::install_local(&file, &target, &home) });
+        cx.spawn(async move |this, cx| {
+            let installed = task.await;
+            let _ = this.update(cx, |this, cx| {
+                this.importing.busy = this.importing.busy.saturating_sub(1);
+                this.importing.note = Some(installed.map(|m| {
+                    format!(
+                        "Added {} {} to {instance_name}'s {} mods. It loads the next time \
+                         Minecraft starts.",
+                        m.name,
+                        m.version,
+                        m.loader.name()
+                    )
+                }));
+                this.mods.loaded = false;
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     /// The root's drop target: every drop the sections don't take.
     pub(super) fn import_drop_target(
         &self,
@@ -94,7 +136,7 @@ impl Launcher {
         let line = match (&self.importing.note, self.importing.busy) {
             (_, n) if n > 0 => text(theme::LABEL)
                 .text_color(t.ink_soft)
-                .child("Making the instance from the shared file…"),
+                .child("Importing…"),
             (Some(Ok(said)), _) => text(theme::LABEL)
                 .text_color(t.ink_soft)
                 .child(said.clone()),

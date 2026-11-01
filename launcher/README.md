@@ -196,12 +196,15 @@ The opening, then Play ([clip](docs/opening.webm)):
   step through) with **Copy** (the picture, to the clipboard), **Open**, **Show in folder** and
   **Delete** (to the trash, after a confirmation). From the command line:
   `horizon-launcher screenshots [list|delete] [--instance <name>]`.
-- **Java** (for the Minecraft: Java Edition instances to come): the runtime a version's JSON asks for
-  (`javaVersion`: its major exactly, Java 8 before that field), found among Mojang's runtimes Morizen
-  downloaded (`minecraft/runtime/` in its data folder, the one preparing uses) and the Java homes installed
-  on this computer, read from their `release` files without starting them; when none has that major,
-  Mojang's runtime is downloaded; an instance may name its own Java home instead.
-  `horizon-launcher java [list|install]`.
+- **Minecraft: Java Edition instances**: vanilla, Fabric and Quilt run as the real Java game in a
+  separate instance folder. The Mods page filters Modrinth to the instance's Minecraft version and
+  loader, checks downloads and dependencies, and keeps their original JARs in `mods/`. A local
+  Fabric/Quilt mod can be dropped on the launcher or picked with **Add JAR…**; its metadata and
+  loader are checked without running its code, and no existing JAR is overwritten. The runtime is
+  the major the version JSON asks for (`javaVersion`, Java 8 before that field), found among
+  Mojang's runtimes and installed Java homes or downloaded from Mojang when missing. An instance
+  may name its own Java home instead. `horizon-launcher instance create <name> --minecraft
+  <version> --loader fabric|quilt`, `instance loader`, and `instance java` configure it.
 - **Multiplayer**: Home lists the selected instance's servers, the game's own Multiplayer list
   (`servers.dat`, each with the picture the game last saw). **Join** starts the game straight into
   one; **Add server** and **Remove** (after a confirmation) change the file the game reads,

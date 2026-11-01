@@ -827,6 +827,25 @@ impl Launcher {
         line_edit::mouse(field, cx, |this| &mut this.mods.text)
     }
 
+    /// Picks local Fabric/Quilt jars and sends them through the same safe drop-import path.
+    fn choose_java_mods(&mut self, cx: &mut Context<Self>) {
+        let paths = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: true,
+            prompt: Some("Add JAR".into()),
+        });
+        cx.spawn(async move |this, cx| {
+            if let Ok(Ok(Some(paths))) = paths.await {
+                let _ = this.update(cx, |this, cx| {
+                    this.import_dropped(paths, cx);
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
+
     pub(super) fn mods_page(&mut self, cx: &mut Context<Self>) -> Div {
         let t = self.theme;
         // Packs and mods go into the selected instance: picking another reads its list.
@@ -915,6 +934,20 @@ impl Launcher {
         // The registry lists only what was made for Morizen: no "everything", no Modrinth filters.
         let registry = self.mods.source == SourceId::Morizen;
         let filters = (!registry).then(|| self.mods_filters(cx));
+        let add_jar = (self.mods.kind == PackKind::Mod
+            && self
+                .mods
+                .java
+                .as_ref()
+                .is_some_and(|target| target.loader.is_some()))
+        .then(|| {
+            button("mods-add-jar", "Add JAR…", Kind::Ghost, &t).on_click(cx.listener(
+                |this, _: &ClickEvent, _, cx| {
+                    this.choose_java_mods(cx);
+                    cx.notify();
+                },
+            ))
+        });
         let controls = div()
             .flex()
             .flex_col()
@@ -926,7 +959,8 @@ impl Launcher {
                     .items_center()
                     .gap(px(12.))
                     .child(self.mods_field(cx))
-                    .when(!registry && !java, |d| d.child(toggle)),
+                    .when(!registry && !java, |d| d.child(toggle))
+                    .children(add_jar),
             )
             .children(source_note)
             .children(filters)
@@ -1233,7 +1267,11 @@ impl Launcher {
                 .child(
                     div()
                         .font_family(theme::MONO)
-                        .child(format!("checked: {}", short_sum(&e.checksum))),
+                        .child(if e.source == SourceId::Local {
+                            "local file: no source checksum".to_string()
+                        } else {
+                            format!("checked: {}", short_sum(&e.checksum))
+                        }),
                 );
             index_row(
                 i + 1,

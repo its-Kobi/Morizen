@@ -6,14 +6,17 @@ registry for Horizon's own mods, modpacks, resource packs and shader packs; see 
 
 ## What it offers
 
-Horizon doesn't run Java code ([mods.md](mods.md)). It ports what a Java mod
-carries as data (blocks, items, recipes, loot tables, tags, worldgen, textures, names) with `horizon-port-pack`, and
-says before install which of the mod's features that leaves out. Horizon `.hmod` mods aren't on Modrinth or CurseForge
-yet (Modrinth has no `horizon` loader).
+Morizen's native Rust game doesn't run Java code ([mods.md](mods.md)). For a native Morizen instance,
+the launcher ports what a Java mod carries as data (blocks, items, recipes, loot tables, tags,
+worldgen, textures, names) with `horizon-port-pack`, and says before install which features that
+leaves out. A **Minecraft: Java Edition instance** instead runs the real game through Fabric or
+Quilt, so its Java mods remain JARs and execute through that loader. Morizen `.hmod` mods aren't on
+Modrinth or CurseForge yet (Modrinth has no `horizon` loader).
 
 | Kind | Goes to | How well it runs |
 |---|---|---|
-| Java mods (Fabric, NeoForge, Forge, Quilt) | ported into `horizon-mods/<mod id>/` and turned on | Checked from its jar before install: **Works**, **Partly** or **Doesn't run** ([below](#java-mods)) |
+| Java mods in a native Morizen instance | ported into `horizon-mods/<mod id>/` and turned on | Checked from its jar before install: **Works**, **Partly** or **Doesn't run** ([below](#java-mods)) |
+| Fabric/Quilt mods in a Java instance | the instance's `mods/*.jar`, unchanged | **Works** when Modrinth lists the instance's Minecraft version and loader; local JARs are checked for matching Fabric/Quilt metadata |
 | Resource packs | `resourcepacks/` beside `options.txt` | **Works** when made for 26.3 ([resource-packs.md](resource-packs.md) lists what Horizon reads). Older packs are **Partly**: they load with vanilla's compatibility warning |
 | Modpacks (`.mrpack`, CurseForge zip) | the Modpacks page's import | **Partly**: Horizon runs the mods it can port, from the player's own downloads ([modpacks.md](modpacks.md)) |
 | Shader packs (`.hshader`, Horizon's registry only) | `shaderpacks/` beside `options.txt` | **Works** when made for 26.3: checked by the game's own check before install ([shaders.md](shaders.md)). The `shaders/`-format packs on Modrinth and CurseForge are not offered |
@@ -28,6 +31,26 @@ By default a search shows only what runs: Java mods made for 26.3, resource pack
 never offered for install.
 
 ## Java mods
+
+### Java instances: run the original JAR
+
+When the selected instance plays Minecraft: Java Edition with Fabric or Quilt, the Mods page
+filters Modrinth to that exact Minecraft version and loader. **Install** downloads the original JAR
+and its required dependencies, verifies every source checksum, and puts them in the instance's
+`mods/` folder. Nothing is translated or ported. Quilt instances also accept Fabric mods, as Quilt
+does.
+
+**Add JAR…**, or dropping a `.jar` anywhere on the launcher, adds a local mod to the selected Java
+instance. The launcher opens the archive without running code, reads `fabric.mod.json` or
+`quilt.mod.json`, checks that its loader matches the instance, refuses duplicate mod ids and never
+overwrites an existing file. Forge and NeoForge JARs are named and refused until those loaders are
+supported. Local files are the player's responsibility; unlike Modrinth downloads, they have no
+source checksum or automatic dependency download.
+
+This does not make Fabric JARs run inside Morizen's Rust engine. It is a compatibility route through
+the real Java game, avoiding a reimplementation of Fabric and Minecraft's Java internals.
+
+### Native Morizen instances: port the content
 
 Before a mod is offered for install, the launcher reads its jar. For each result it picks the version it would
 install (the newest for 26.3; with **Show everything**, else the newest for 1.21 or later, the versions port-pack

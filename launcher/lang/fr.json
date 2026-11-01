@@ -39,6 +39,7 @@
   "the update failed: {error}": "la mise à jour a échoué : {error}",
   "Install": "Installer",
   "Update": "Mettre à jour",
+  "Add JAR…": "Ajouter un JAR…",
   "Restart": "Redémarrer",
   "Check now": "Vérifier",
   "Open": "Ouvrir",

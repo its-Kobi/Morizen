@@ -335,7 +335,7 @@ Make an instance: empty but for your options and name, or a copy of another one'
 
 - `NAME`
 - `--copy`: The instance to copy (its name or id)
-- `--minecraft`: Make a Minecraft: Java Edition instance of this version (1.21.4, latest or latest-snapshot) instead of a Horizon one
+- `--minecraft`: Make a Minecraft: Java Edition instance of this version (1.21.4, latest or latest-snapshot) instead of a Morizen one
 - `--loader`: With this mod loader: fabric or quilt
 - `--loader-version`: The loader's version (default: its newest stable one)
 
@@ -392,7 +392,7 @@ MCP: `instance_rename`.
 
 ## `horizon-launcher instance delete`
 
-Delete an instance: its folder (worlds, options, packs) goes to the Trash, where you can get it back. Horizon's own instance stays.
+Delete an instance: its folder (worlds, options, packs) goes to the Trash, where you can get it back. Morizen's own instance stays.
 
     horizon-launcher instance delete <INSTANCE>
 
@@ -434,7 +434,7 @@ MCP: `instance_select`.
 
 ## `horizon-launcher instance version`
 
-Keep an instance on one installed Horizon version, or "latest" to follow updates again.
+Keep an instance on one installed Morizen version, or "latest" to follow updates again.
 
     horizon-launcher instance version <INSTANCE> <VERSION>
 
@@ -444,7 +444,7 @@ MCP: `instance_version`.
 
 ## `horizon-launcher instance export`
 
-Export an instance (or a port) to share: its settings, packs, Horizon mods and the worlds named, as a .mrpack (resource packs from Modrinth listed by download) or a zip. Never logs, screenshots or account data; worlds go without their per-player files.
+Export an instance (or a port) to share: its settings, packs, Morizen mods and the worlds named, as a .mrpack (resource packs from Modrinth listed by download) or a zip. Never logs, screenshots or account data; worlds go without their per-player files.
 
     horizon-launcher instance export [INSTANCE]
 
@@ -485,7 +485,7 @@ MCP: `instance_shortcut`.
 
 ## `horizon-launcher instance import`
 
-Import what a file is, as dropping it on the window does: a shared instance (a .mrpack without mod loaders, such as `instance export` writes, or a game folder zip) becomes a new instance; a Java modpack goes to the Modpacks import; a resource or shader pack into the instance (default: the selected one).
+Import what a file is, as dropping it on the window does: a shared instance (a .mrpack without mod loaders, such as `instance export` writes, or a game folder zip) becomes a new instance; a Java modpack goes to the Modpacks import; a resource or shader pack goes into the instance; and a local Fabric/Quilt JAR goes into a matching Java instance (default: the selected one). Local JAR metadata is read without executing code, and existing files are never overwritten.
 
     horizon-launcher instance import <FILE>
 

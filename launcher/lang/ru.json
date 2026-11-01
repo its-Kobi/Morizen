@@ -39,6 +39,7 @@
   "the update failed: {error}": "обновление не удалось: {error}",
   "Install": "Установить",
   "Update": "Обновить",
+  "Add JAR…": "Добавить JAR…",
   "Restart": "Перезапустить",
   "Check now": "Проверить",
   "Open": "Открыть",
