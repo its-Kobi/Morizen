@@ -37,7 +37,7 @@ almost nothing but type. What we take from it is its restraint rather than its c
 
 ### Colour
 
-Cool, slightly blue neutrals in two appearances with the same restraint, and Morizen's violet: the
+Cool, slightly blue neutrals in two appearances with the same restraint, and Horizon's violet: the
 game's menus keep the palette Horizon drew. The launcher and the project site use the warm neutrals and
 gold of [Blocks](#blocks) instead.
 Every text colour passes WCAG AA (4.5:1) on every background it is used on; the tests in
@@ -183,8 +183,8 @@ of the main action. The game's menus keep `LIGHT` and `DARK`.
   and turns compact (characters beside the text) when the window is too short. The website shows the
   banner the same way on Home and the hosting docs, as a `rel="sponsored"` link.
 - **Pixel art drawn in code.** The stone behind the pages is close shades of the page colour
-  (`TILE_SHADES`), never Minecraft's stone; the landscape is a banded sky, a sun cut in slices like
-  the mark, hills and square trees (a sunset in dark, a dawn in light). The launcher bakes them in
+  (`TILE_SHADES`), never Minecraft's stone; the landscape is a banded sky, a sun cut in slices,
+  hills and square trees (a sunset in dark, a dawn in light). The launcher bakes them in
   `launcher/src/art.rs` at the window's scale so each texel covers whole device pixels; the website
   draws them in its `scripts/art.mjs`.
 - **Icons**: Pixelarticons (MIT), 24 unit pixel SVGs in `crates/horizon-theme/icons/pixel/`, tinted
@@ -194,14 +194,14 @@ of the main action. The game's menus keep `LIGHT` and `DARK`.
 
 ## The mark
 
-**Horizon line.** A sun half set below a horizon, drawn as three horizontal bars of 4, 8 and
-10 units over a 12 unit line, on a 16 unit grid. The bars are the sun cut by the horizon into
-slices, which also reads as layers of terrain and as a nod to voxels without drawing a block. It
-is built on whole units of the 16 px grid so it stays sharp at 16 px, and it scales without
-detail to 1024 px.
+**The H.** An H whose crossbar is the horizon: a 2 unit stem at x 4 and another at x 10, four
+units tall, with the line running edge to edge at y 7, on a 16 unit grid. The stems' reflection
+below the line is the same shape at half strength, so the letter reads as a sun lit above the
+horizon and dark below it. The mark is whole units of the 16 px grid, so it stays sharp at 16 px
+and scales without detail to 1024 px.
 
-- Monochrome: the mark in `ink` on light, in `ink` (dark) on dark; the line can take the accent.
-- App icon: the mark in `#ecedf3` with the line in `#9a86ff`, on a `#16181f` rounded square
+- Monochrome: the mark in `ink` on light, in `ink` (dark) on dark; the line takes the accent.
+- App icon: the mark in `#f5f3ea` with the line in `#ffd21e`, on a `#0f0d0a` rounded square
   (macOS grid: 824 px tile with 185 px corners in a 1024 canvas; Windows and Linux use the full
   square with 22 % corners).
 - Exports and where they go: `docs/media/brand/README.md`.

@@ -112,6 +112,39 @@ jobs:
           cargo +stable fmt --check
           cargo +stable clippy --all-targets --locked -- -D warnings
           cargo +stable test --locked --lib
+  # The launcher ships a native Windows app. Linux catches most Rust mistakes, but not Windows-only
+  # modules, resources or linker failures, so changed launcher pull requests and every main build
+  # compile and test it on the same hosted system players use.
+  launcher-windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Does this pull request change the launcher or a crate it builds?
+        if: github.event_name == 'pull_request'
+        id: launcher
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python tools/ci/rust_changes.py --launcher "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
+      - name: Install stable Rust
+        if: steps.launcher.outputs.required != 'false'
+        run: rustup toolchain install stable --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        if: steps.launcher.outputs.required != 'false'
+        with:
+          workspaces: launcher
+          shared-key: launcher-windows
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Build and test the launcher on Windows
+        if: steps.launcher.outputs.required != 'false'
+        working-directory: launcher
+        run: |
+          cargo +stable build --locked --bin horizon-launcher
+          cargo +stable test --locked --lib
   # Most pull requests leave the harnesses to parity-main, which runs them on main a batch of merges at a time
   # (.github/workflows/parity-main.yml; releases wait for it). A pull request still runs them itself when it changes
   # a harness, an oracle, a probe or the runner, or carries the run-parity label (run-parity.yml, when it is added).

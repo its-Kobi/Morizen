@@ -1,7 +1,7 @@
-# Horizon's mark and icons
+# Morizen's mark and icons
 
-**The mark.** An H whose crossbar is the horizon: the line runs edge to edge in Horizon's violet,
-the stems above it in full strength and their reflection below at a third. It is drawn on whole
+**The mark.** An H whose crossbar is the horizon: the line runs edge to edge in Morizen's gold,
+the stems above it in full strength and their reflection below in a muted tone. It is drawn on whole
 units of a 16-unit grid, so it is sharp at 16 px and holds at 1024 px. `docs/design-system.md`
 places it in the design system; `candidates/` keeps the two alternatives that were shown with it.
 

@@ -42,7 +42,7 @@ fn native_registry_entries_are_mods_that_say_they_run_native_code() {
     assert!(found.iter().any(|p| p.id == index.projects[0].id));
     let entry = |file: &str| {
         serde_json::from_value::<installed::Entry>(serde_json::json!({
-            "source": "horizon", "project": "p", "slug": "p", "title": "P", "kind": "mod",
+            "source": "morizen", "project": "p", "slug": "p", "title": "P", "kind": "mod",
             "version": "1", "number": "1", "file": file, "checksum": "", "page": ""
         }))
         .unwrap()
@@ -52,16 +52,35 @@ fn native_registry_entries_are_mods_that_say_they_run_native_code() {
         Some("veinminer")
     );
     assert_eq!(mod_id(&entry("horizon-mods/zoom.hmod")), Some("zoom"));
+
+    // Manifests written before the fork renamed the registry still load.
+    let old = serde_json::from_value::<installed::Entry>(serde_json::json!({
+        "source": "horizon", "project": "p", "slug": "p", "title": "P", "kind": "mod",
+        "version": "1", "number": "1", "file": "horizon-mods/zoom.hmod",
+        "checksum": "", "page": ""
+    }))
+    .unwrap();
+    assert_eq!(old.source, SourceId::Morizen);
 }
 
 #[test]
-fn only_horizons_own_projects_go_without_the_not_endorsed_line() {
+fn only_our_own_projects_go_without_the_not_endorsed_line() {
     let mut p = sample().projects[0].clone();
     p.authors = vec!["Morizen".into()];
     p.source = "https://github.com/horizon-rust/horizon-mod-zoom".into();
     assert!(official(&p));
+    // The registry's entries still credit Horizon, the project this is a fork of.
+    p.authors = vec!["Horizon".into()];
+    assert!(official(&p));
+    p.authors.push("Someone else".into());
+    assert!(
+        !official(&p),
+        "an official author among others is not enough"
+    );
+    p.authors = vec!["Horizon".into()];
     p.source = "https://github.com/someone/horizon-mod-zoom".into();
     assert!(!official(&p), "the name alone doesn't make it official");
+    p.source = "https://github.com/horizon-rust/horizon-mod-zoom".into();
     p.authors = vec!["levzzz5154".into()];
     assert!(!official(&p));
 }

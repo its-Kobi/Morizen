@@ -11,8 +11,10 @@ use std::path::{Path, PathBuf};
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Accent {
+    /// Morizen's gold: the theme's own tokens, unchanged.
     #[default]
-    Violet,
+    #[serde(alias = "violet", alias = "purple", alias = "default")]
+    Gold,
     Blue,
     Teal,
     Green,
@@ -23,7 +25,7 @@ pub enum Accent {
 
 impl Accent {
     pub const ALL: [Accent; 7] = [
-        Self::Violet,
+        Self::Gold,
         Self::Blue,
         Self::Teal,
         Self::Green,
@@ -35,7 +37,7 @@ impl Accent {
     /// Its name in `settings.json` and on the command line.
     pub fn name(self) -> &'static str {
         match self {
-            Self::Violet => "violet",
+            Self::Gold => "gold",
             Self::Blue => "blue",
             Self::Teal => "teal",
             Self::Green => "green",
@@ -47,18 +49,18 @@ impl Accent {
 
     pub fn parse(name: &str) -> Option<Self> {
         let name = name.trim().to_ascii_lowercase();
-        let name = if name == "purple" || name == "default" {
-            "violet"
-        } else {
-            &name
+        let name = match name.as_str() {
+            // Names older settings files and older commands used for the default.
+            "violet" | "purple" | "default" => "gold",
+            other => other,
         };
         Self::ALL.into_iter().find(|a| a.name() == name)
     }
 
-    /// Its hue in degrees; None for the violet, whose tokens stay as they are.
+    /// Its hue in degrees; None for the gold, whose tokens stay as they are.
     fn hue(self) -> Option<f32> {
         match self {
-            Self::Violet => None,
+            Self::Gold => None,
             Self::Blue => Some(212.),
             Self::Teal => Some(176.),
             Self::Green => Some(140.),

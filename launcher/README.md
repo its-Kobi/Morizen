@@ -32,12 +32,10 @@ The opening, then Play ([clip](docs/opening.webm)):
   system's libraries, the asset index and the assets. Every file must have the size and sha1
   Mojang lists. The Play page shows how far it is and has Cancel; files already whole are kept,
   so the next try goes on from there. **From my install** prepares from the player's own launcher
-  instead, and an install that lacks the version falls back to the download. **Play** on a version
-  not prepared yet does it all for an owner, as the official launcher does: it prepares from the
-  install when there is one, else downloads (with Mojang's Java when no Java 25 is installed), then
-  starts the game. With no install on the computer the Play page offers the download alone and the
-  Minecraft folder row says none is needed. Without an owner,
-  the Play page asks to sign in first. `horizon-launcher prepare --download`.
+  instead. **Play** on a version not prepared yet uses that account-free path and then starts the
+  game. If no local launcher has the pinned Minecraft version, the page keeps Play available but
+  explains that the player must either choose an install that has it or sign in to download it from
+  Mojang. `horizon-launcher prepare --download` is the explicit download path.
 - **Mods**: search Modrinth (CurseForge support is coming soon) for resource
   packs and modpacks, each marked Works, Partly or Doesn't run in
   Morizen; Java mod jars are never offered. Install puts a pack and what it needs in
@@ -138,18 +136,19 @@ The opening, then Play ([clip](docs/opening.webm)):
   [instance] [--remove]`; `HORIZON_LAUNCHER_DESKTOP` points it at another folder.
 - **Accounts and quick switch**: the top bar's account chip opens a menu of everyone who can play:
   each signed-in Microsoft account, the offline names the player keeps, and the name the game
-  made up (`horizon-player.txt`). Picking one plays as it from the next Play. Offline names play
-  only while an account that owns the game is signed in ([Microsoft accounts](#microsoft-accounts));
-  signing the last one out keeps them, unplayable until one is back. Settings > Account
+  made up (`horizon-player.txt`). Picking one plays as it from the next Play. An account is
+  optional: offline names play, are dressed and are forgotten without one. A Microsoft account is
+  what online servers such as Hypixel need (the game asks for its session) and what downloading
+  Minecraft from Mojang needs ([Microsoft accounts](#microsoft-accounts)). Settings > Account
   adds offline names (3 to 16 letters, digits or `_`; the game gets `--name`) and forgets them,
   skin and cape files included, and rolls the game's made-up name for a new one; the Console's
   Share log takes the names out of the log too. `horizon-launcher account offline
   [NAME]`, `account select <name>` (an account or an offline name), `account forget-offline
   <name>`.
 - **Accent and Home background**: on top of Dark, Light or System, Settings > Launcher picks an
-  accent (Morizen's violet, blue, teal, green, amber, red or pink) and a picture of the player's
+  accent (Morizen's gold, blue, teal, green, amber, red or pink) and a picture of the player's
   own behind Home (PNG, JPEG or WebP, cropped to fill; **Landscape** brings Morizen's back). An
-  accent turns the violet tokens to its hue, then darkens or lightens them just enough to keep
+  accent turns the gold tokens to its hue, then darkens or lightens them just enough to keep
   white on the Play button at 4.5:1 and the accent at 3:1 on every background (a test holds every
   accent in both looks to it). The picture is copied into the data folder.
   `horizon-launcher settings accent NAME`, `settings background PATH|default`.
@@ -397,19 +396,20 @@ The window, the command line and the MCP server all call the same core, `src/bac
 
 ## Microsoft accounts
 
-The launcher starts the game only while a Microsoft account that owns Minecraft: Java Edition is
-signed in, as other launchers do: without one, Play (Home, instances, `horizon-launcher play`, the
-MCP's `play`) says "Sign in with a Microsoft account that owns Minecraft: Java Edition to play"
-and starts nothing. Settings → Accounts signs in: the launcher shows a code, you enter it at
-microsoft.com/link, and the launcher checks that the account owns the game. It asks again at every
-Play, with the token renewal; with no network the last answer stands, and a "doesn't own" blocks
-at once. The account also plays online-mode servers under your own name and skin; offline names
-play LAN and offline-mode servers beside it. The game binary started directly (`horizon-client`,
-`horizon-ctl launch`), the harnesses and the servers don't go through this check. Tokens live in the system keychain (Keychain,
-Credential Manager, or the Secret Service on Linux), never in a file, a log or the command line;
-`accounts.json` in the data folder keeps only names and UUIDs. Without a keychain you stay signed
-in until the launcher closes. When the game starts, it gets the session in a private file it
-deletes as soon as it has read it. Sign out removes the tokens.
+A Microsoft account is optional. Home, instances, `horizon-launcher play` and the MCP's `play`
+start Morizen offline without one; offline names, their optional skins and capes, single player,
+LAN and offline-mode servers all work. An account that does not own the game, an expired sign-in
+or no network does not stop Play—it falls back to offline mode and explains why.
+
+An account that owns Minecraft: Java Edition is needed only to download Minecraft from Mojang and
+to join authenticated online servers such as Hypixel under the account's name and skin. Settings →
+Accounts signs in: the launcher shows a code, you enter it at microsoft.com/link, and the launcher
+checks ownership. The sign-in screen opens only when the player asks for it; it is never an opening
+gate. Tokens live in the system keychain (Keychain, Credential Manager, or the Secret Service on
+Linux), never in a file, log or command line; `accounts.json` keeps only names and UUIDs. Without a
+keychain the sign-in lasts until the launcher closes. When an account plays, the game receives its
+session in a private file and deletes it as soon as it is read. Sign out removes the tokens but
+leaves offline names playable.
 
 Sign-in needs Morizen's own Azure app registration: its client ID is built in from
 `HORIZON_MSA_CLIENT_ID` (and `HORIZON_MSA_CLIENT_ID` at run time overrides it; empty = not

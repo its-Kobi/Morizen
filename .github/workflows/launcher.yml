@@ -117,7 +117,7 @@ jobs:
     timeout-minutes: ${{ matrix.mac && 60 || 40 }}
     env:
       RUSTFLAGS: ${{ matrix.rustflags }}
-      # Horizon's Azure app for Microsoft sign-in (docs/microsoft-account.md): a repository
+      # Morizen's Azure app for optional Microsoft sign-in (docs/microsoft-account.md): a repository
       # variable, not a secret. Unset, the launcher says sign-in is not configured.
       HORIZON_MSA_CLIENT_ID: ${{ vars.HORIZON_MSA_CLIENT_ID }}
       # The mod browser's CurseForge source (docs/mod-browser.md#curseforge): a repository secret. Unset, the

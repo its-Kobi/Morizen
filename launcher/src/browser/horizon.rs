@@ -227,10 +227,12 @@ fn kind_of(kind: &index::Kind) -> Option<Kind> {
 /// Where the registry's mod policy is: who owns and answers for a project, takedowns.
 pub const POLICY: &str = "https://playhorizon.dev/mods/policy";
 
-/// Whether the Morizen project made `p` (the mod policy's "Official": author Morizen, source in
-/// the horizon-rust organisation).
+/// Whether the Morizen project made `p` (the mod policy's "Official": author Horizon or Morizen,
+/// source in the horizon-rust organisation).
 pub fn official(p: &index::Project) -> bool {
-    p.authors == ["Morizen"] && p.source.starts_with("https://github.com/horizon-rust/")
+    p.authors.len() == 1
+        && matches!(p.authors[0].as_str(), "Morizen" | "Horizon")
+        && p.source.starts_with("https://github.com/horizon-rust/")
 }
 
 /// What the player reads about a registry project before installing it: who made it, whether its

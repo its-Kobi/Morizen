@@ -1,6 +1,6 @@
 //! The launcher's view of Morizen's design tokens (`crates/horizon-theme`, described in
-//! `docs/design-system.md`): the blocky look it shares with the website ("Blocks"), stone-dark or
-//! lavender-light with Morizen's violet, Pixelify Sans for headings and controls, Geist and Geist
+//! `docs/design-system.md`): the blocky look it shares with the website ("Blocks"), warm-light or
+//! stone-dark with Morizen's gold, Pixelify Sans for headings and controls, Geist and Geist
 //! Mono for text (all bundled, SIL Open Font License).
 use gpui::{rgb, Hsla, WindowAppearance};
 use horizon_launcher::backend::Appearance;

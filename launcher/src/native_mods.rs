@@ -804,7 +804,7 @@ mod tests {
     fn installing_a_native_mod_turns_native_mods_on() {
         let entry = |file: &str| {
             serde_json::from_value::<crate::browser::installed::Entry>(serde_json::json!({
-                "source": "horizon", "project": "p", "slug": "p", "title": "P", "kind": "mod",
+                "source": "morizen", "project": "p", "slug": "p", "title": "P", "kind": "mod",
                 "version": "1", "number": "1", "file": file, "checksum": "", "page": ""
             }))
             .unwrap()

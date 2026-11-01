@@ -101,8 +101,8 @@ enum ServersCmd {
 enum AccountCmd {
     /// The signed-in accounts and which one plays
     List,
-    /// Sign in with a Microsoft account in your browser (device code). Play needs one that owns
-    /// Minecraft: Java Edition
+    /// Sign in with a Microsoft account in your browser (device code), for online servers and
+    /// downloading Minecraft from Mojang
     SignIn,
     /// Sign out: the account's tokens leave the keychain
     SignOut {
@@ -111,9 +111,8 @@ enum AccountCmd {
     },
     /// Play as this account, or as one of your offline names
     Select { who: String },
-    /// Play offline (LAN, offline-mode servers) beside a signed-in account that owns the game:
-    /// as NAME (kept to switch back to; 3 to 16 letters, digits or _), or as the name the game
-    /// made up
+    /// Play without an account: as NAME (kept to switch back to; 3 to 16 letters, digits or _),
+    /// or as the name the game made up
     Offline { name: Option<String> },
     /// Forget one of your offline names; its skin and cape go with it
     ForgetOffline { name: String },
@@ -741,7 +740,7 @@ enum Cmd {
     /// newest to keep; "default" is 2), opening-animation on|off, proxy http://host:port
     /// ("default" removes it), while-playing stay|minimize|hide (what the window does while the game runs), language
     /// system|en|fr|ru|de|zh|es|uk (the window's language; system follows the computer's), accent
-    /// violet|blue|teal|green|amber|red|pink, background PATH (a picture behind Home; "default"
+    /// gold|blue|teal|green|amber|red|pink, background PATH (a picture behind Home; "default"
     /// shows Morizen's landscape)
     Settings {
         #[arg(value_parser = SETTING_KEYS)]
@@ -1636,8 +1635,9 @@ fn account_command(action: AccountCmd, as_json: bool) -> Result<(), String> {
                 }));
             } else if accounts.accounts.is_empty() && accounts.offline.is_empty() {
                 println!(
-                    "No Microsoft account signed in. Play needs one that owns Minecraft: Java \
-                     Edition: horizon-launcher account sign-in"
+                    "No Microsoft account signed in. Playing needs none; online servers and \
+                     downloading Minecraft from Mojang need one that owns it: \
+                     `horizon-launcher account sign-in`"
                 );
             } else {
                 for a in &accounts.accounts {
@@ -1658,7 +1658,10 @@ fn account_command(action: AccountCmd, as_json: bool) -> Result<(), String> {
                     );
                 }
                 if !accounts.has_owner(account::store()) {
-                    println!("{}.", account::NEEDS_OWNER);
+                    println!(
+                        "Playing works without an account; online servers need one that owns \
+                         Minecraft: Java Edition."
+                    );
                 }
             }
         }
@@ -3177,7 +3180,7 @@ fn modpack(action: ModpackCmd, as_json: bool) -> Result<(), String> {
             for p in &registry {
                 if as_json {
                     json(
-                        serde_json::json!({"pack": p.id, "name": p.name, "version": p.version, "source": "horizon", "mods": p.mods}),
+                        serde_json::json!({"pack": p.id, "name": p.name, "version": p.version, "source": "morizen", "mods": p.mods}),
                     );
                 } else {
                     println!(

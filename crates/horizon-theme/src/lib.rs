@@ -3,7 +3,7 @@
 //! generated from [`css`] by `cargo run -p xtask -- tokens`, which the site's build reads from main). Change a value here and all three
 //! follow. The system is described in `docs/design-system.md`.
 //!
-//! Warm neutrals in two appearances and one gold accent; Geist and Geist Mono only, bundled        
+//! Warm neutrals in two appearances and one gold accent; Geist and Geist Mono only, bundled
 //! here under the SIL Open Font License (`fonts/OFL-Geist.txt`). Colours are `0xRRGGBB`; sizes
 //! are in logical pixels.
 use std::fmt::Write as _;

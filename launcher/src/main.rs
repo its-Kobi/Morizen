@@ -13,7 +13,6 @@ mod console;
 mod console_page;
 mod cull;
 mod datapacks_page;
-mod dev_options;
 mod export_page;
 mod game_tools;
 mod import_page;
@@ -213,15 +212,12 @@ struct Launcher {
     sign_in_state: Option<SignInState>,
     /// What to say when the keychain doesn't keep sign-ins ([`account::no_keychain`]).
     keychain: Option<String>,
-    /// Whether an account here owns the game, by the keychain's last answers (the owner gate);
-    /// none until the keychain has been read.
+    /// Whether an account here owns the game, by the keychain's last answers (what a download
+    /// needs; playing needs none); none until the keychain has been read.
     owner: Option<bool>,
-    /// Play was refused (or Home's Sign in pressed): the owner gate's screen is open.
+    /// The player asked to sign in (Settings' account row, a download, a server): the Microsoft
+    /// account screen is open.
     owner_screen_open: bool,
-    /// Clicks on the sidebar's launcher version, and whether they revealed the developer options
-    /// (`dev_options`) for this run.
-    dev_clicks: u8,
-    dev_options: bool,
     /// The game is waiting for its session (a token renewal), or a Java instance for its files
     /// and Java (`start_java`), before it starts.
     starting_client: Option<String>,
@@ -439,8 +435,6 @@ impl Launcher {
             keychain: None,
             owner: None,
             owner_screen_open: false,
-            dev_clicks: 0,
-            dev_options: false,
             starting_client: None,
             play_when_prepared: None,
             friend_code: line_edit::LineEdit::new(String::new(), 256, 32),
@@ -712,20 +706,11 @@ impl Launcher {
                 Msg::Session(session) => {
                     if let Some(tag) = self.starting_client.take() {
                         let mut cmd = backend::client_command(&tag);
-                        let (file, offline) = match session {
-                            Ok(pass) => pass,
-                            Err(account::NoOwner) => {
-                                self.owner = Some(false);
-                                self.owner_screen_open = true;
-                                self.client_error = Some(format!("{}.", tr(account::NEEDS_OWNER)));
-                                self.starting_pack = None;
-                                self.joining = None;
-                                self.quick_play = None;
-                                continue;
-                            }
-                        };
-                        // Past the gate by the developer option alone is no owner.
-                        if !self.settings.dev_offline {
+                        let (file, offline) = session;
+                        // A session means an account that owns the game played; without one the
+                        // game still starts, offline, and the owner answer stays as the keychain
+                        // gave it.
+                        if file.is_some() {
                             self.owner = Some(true);
                         }
                         if let Some(file) = file {
@@ -1009,10 +994,6 @@ impl Launcher {
                     self.owner = Some(true);
                     self.owner_screen_open = false;
                     self.client_error = None;
-                    if !self.settings.owner_notice_seen {
-                        self.settings.owner_notice_seen = true;
-                        self.settings.save();
-                    }
                 }
                 self.sign_in_state = Some(state);
                 changed = true;
@@ -1246,15 +1227,14 @@ impl Launcher {
         self.starting_client = Some(tag.clone());
         self.play_pressed = Some(Instant::now());
         let tx = self.tx.clone();
-        let offline_without_owner = self.settings.dev_offline;
         std::thread::spawn(move || {
             backend::complete_assets(&tag);
-            let session = account::session_for_game(&backend::game_home(), offline_without_owner);
+            let session = account::session_for_game(&backend::game_home());
             let _ = tx.send(Msg::Session(session));
         });
     }
 
-    /// Starts the Microsoft sign-in; Settings and the owner gate's screen show its code.
+    /// Starts the Microsoft sign-in; Settings and the account screen show its code.
     fn start_sign_in(&mut self) {
         if let Some(old) = self.sign_in.replace(SignIn::start()) {
             old.cancel();
@@ -1446,7 +1426,7 @@ fn keyboard(el: Stateful<Div>, t: &Theme) -> Stateful<Div> {
 }
 
 /// A button: a block with a light bevel on top and a darker lip below, its label in the pixel
-/// face. Primary (the one main action) is the violet face; Secondary a raised block; Ghost only
+/// face. Primary (the one main action) is the gold face; Secondary a raised block; Ghost only
 /// its label until the pointer is over it.
 fn button(
     id: impl Into<SharedString>,
@@ -1565,7 +1545,7 @@ fn sync_system_clipboard(text: String) {
     });
 }
 
-/// An on/off switch: a square knob sliding in a sunk track that turns violet when on.
+/// An on/off switch: a square knob sliding in a sunk track that turns gold when on.
 fn switch(id: impl Into<SharedString>, on: bool, t: &Theme) -> Stateful<Div> {
     let t = *t;
     let id: SharedString = id.into();
@@ -1667,20 +1647,19 @@ fn segments<T: Copy + PartialEq + 'static>(
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PlayPress {
     Play,
-    /// Not prepared, for an account that owns the game: prepare it (from the player's install,
-    /// else downloaded from Mojang for that account), then play, as the official launcher does.
+    /// Not prepared: prepare it from the player's own install, then play.
     PrepareThenPlay,
-    /// Not prepared and no owner (signing in comes first), or busy preparing or playing.
+    /// Busy preparing or playing.
     Nothing,
 }
 
-/// `owner`: whether an account here owns the game, by the keychain (`Launcher::owner`).
-fn play_press(prepared: bool, owner: Option<bool>, busy: bool) -> PlayPress {
-    match (prepared, owner) {
-        _ if busy => PlayPress::Nothing,
-        (true, _) => PlayPress::Play,
-        (false, Some(true)) => PlayPress::PrepareThenPlay,
-        (false, _) => PlayPress::Nothing,
+/// What the Play button does: play, prepare the version from the player's own install and then
+/// play, or nothing while something else runs. Playing needs no account.
+fn play_press(prepared: bool, busy: bool) -> PlayPress {
+    match (prepared, busy) {
+        (_, true) => PlayPress::Nothing,
+        (true, false) => PlayPress::Play,
+        (false, false) => PlayPress::PrepareThenPlay,
     }
 }
 
@@ -1688,7 +1667,7 @@ fn play_press(prepared: bool, owner: Option<bool>, busy: bool) -> PlayPress {
 /// code, a pack's Play) starts it now: only when Play would play. Never while a preparation runs:
 /// the game would open on half-written files.
 fn starts_now(prepared: bool, preparing: bool, running: bool) -> bool {
-    play_press(prepared, None, preparing || running) == PlayPress::Play
+    play_press(prepared, preparing || running) == PlayPress::Play
 }
 
 /// The selected version once one has been removed: the saved choice if it is still installed,
@@ -2025,7 +2004,7 @@ impl Launcher {
                         .child(
                             blocks::pixel(20., FontWeight::SEMIBOLD)
                                 .text_color(t.ink)
-                                .child("HORIZON"),
+                                .child("MORIZEN"),
                         ),
                 )
             })
@@ -2268,11 +2247,7 @@ impl Launcher {
                 .id("launcher-version")
                 .px(px(8.))
                 .pt(px(6.))
-                .text_color(t.muted)
-                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                    this.version_clicked();
-                    cx.notify();
-                })),
+                .text_color(t.muted),
         );
         div()
             .id("sidebar")
@@ -2470,11 +2445,7 @@ impl Launcher {
                     .top(px(17.))
                     .child(blocks::icon("play", 22., t.on_face)),
             );
-        match play_press(
-            prepared || java.is_some(),
-            self.owner,
-            self.preparing || running,
-        ) {
+        match play_press(prepared || java.is_some(), self.preparing || running) {
             PlayPress::Nothing => play = disabled(play),
             PlayPress::Play => {
                 play = play.on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
@@ -2513,28 +2484,35 @@ impl Launcher {
                     .child(play),
             );
 
-        // Not prepared: an owner can have Morizen download Minecraft from Mojang; without an
-        // owner there is nothing to play, so signing in comes first.
-        let first = (!prepared && !self.preparing)
-            .then_some(self.owner_shown())
-            .flatten();
-        // No launcher folder with Minecraft on this computer: an owner needs none.
+        // Not prepared: Play itself is the simplest path: it prepares the version from the
+        // player's own Minecraft (the folder is found automatically) and starts the game. The
+        // other two ways are offered beside it. Downloading Minecraft from Mojang needs a
+        // signed-in account that owns it; playing does not need any account.
+        let not_prepared = !prepared && !self.preparing;
         let no_install = self.settings.minecraft_dir.is_none();
-        let resources_value = match first {
-            _ if self.preparing => tr("Preparing…").to_string(),
-            Some(true) if no_install => trf(
-                "Not prepared. Play downloads Minecraft {version} from Mojang for your account and prepares it.",
-                &[("version", &version)],
-            ),
-            Some(true) => trf(
-                "Not prepared. Morizen can download Minecraft {version} from Mojang for your account, or use your own install.",
-                &[("version", &version)],
-            ),
-            Some(false) => trf(
-                "Not prepared. Sign in with the Microsoft account that owns Minecraft {version} first.",
-                &[("version", &version)],
-            ),
-            None => backend::resources_summary(prepared, !silent, &version),
+        let resources_value = if self.preparing {
+            tr("Preparing…").to_string()
+        } else if not_prepared {
+            match (self.owner_shown(), no_install) {
+                (Some(true), true) => trf(
+                    "Not prepared. Play downloads Minecraft {version} from Mojang for your account and prepares it.",
+                    &[("version", &version)],
+                ),
+                (Some(true), false) => trf(
+                    "Not prepared. Play uses Minecraft {version} from your own install; you can also let Morizen download it from Mojang.",
+                    &[("version", &version)],
+                ),
+                (_, false) => trf(
+                    "Not prepared. Play uses Minecraft {version} from your own install. No account needed; downloading it from Mojang needs a Microsoft account that owns it.",
+                    &[("version", &version)],
+                ),
+                (_, true) => trf(
+                    "Not prepared. Choose a Minecraft install that has {version}. Playing needs no account; downloading it from Mojang needs one that owns it.",
+                    &[("version", &version)],
+                ),
+            }
+        } else {
+            backend::resources_summary(prepared, !silent, &version)
         };
         let mut prepare = button(
             "prepare",
@@ -2554,31 +2532,18 @@ impl Launcher {
                 cx.notify();
             }));
         }
-        let prepare = match first {
-            Some(true) if no_install => div().child(
-                button(
-                    "prepare-download",
-                    "Download and prepare",
-                    Kind::Secondary,
-                    &t,
-                )
-                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                    this.prepare(backend::MinecraftFrom::Mojang);
-                    cx.notify();
-                })),
-            ),
-            Some(true) => div()
-                .flex()
-                .gap(px(8.))
-                .child(
-                    button("prepare-install", "From my install", Kind::Ghost, &t).on_click(
-                        cx.listener(|this, _: &ClickEvent, _, cx| {
-                            this.prepare(backend::MinecraftFrom::Install);
-                            cx.notify();
-                        }),
-                    ),
-                )
-                .child(
+        let from_install = button("prepare-install", "From my install", Kind::Ghost, &t).on_click(
+            cx.listener(|this, _: &ClickEvent, _, cx| {
+                this.prepare(backend::MinecraftFrom::Install);
+                cx.notify();
+            }),
+        );
+        let prepare = if !not_prepared {
+            div().child(prepare)
+        } else {
+            let row = div().flex().items_center().gap(px(8.)).child(from_install);
+            match self.owner_shown() {
+                Some(true) => row.child(
                     button(
                         "prepare-download",
                         "Download and prepare",
@@ -2590,24 +2555,28 @@ impl Launcher {
                         cx.notify();
                     })),
                 ),
-            Some(false) => div().child(
-                button("prepare-sign-in", "Sign in", Kind::Secondary, &t).on_click(cx.listener(
-                    |this, _: &ClickEvent, _, cx| {
+                _ => row.child(
+                    button(
+                        "prepare-sign-in",
+                        "Sign in to download",
+                        Kind::Secondary,
+                        &t,
+                    )
+                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                         this.sign_in_to_play();
                         cx.notify();
-                    },
-                )),
-            ),
-            None => div().child(prepare),
+                    })),
+                ),
+            }
         };
         let owner = self.owner == Some(true);
         let minecraft = self.settings.minecraft_dir.as_deref().map_or_else(
             || {
                 div()
                     .child(if owner {
-                        tr("None needed: Morizen downloads Minecraft from Mojang for your account.")
+                        tr("No local Minecraft install was found. Morizen can download it from Mojang for your account.")
                     } else {
-                        tr("Not found. Choose the folder where your launcher keeps Minecraft.")
+                        tr("No local Minecraft install was found. Choose its folder, or sign in to download it from Mojang.")
                     })
                     .into_any_element()
             },
@@ -2665,18 +2634,20 @@ impl Launcher {
                 rows = rows.child(self.join_friend_row(self.can_start(&tag), cx));
             }
             // The top bar shows who plays; a row only when there is something to do about it:
-            // no account that owns the game (Play needs one), or offline.
+            // nobody signed in. Playing needs no account; online servers do.
             if self.owner_shown() == Some(false) {
                 rows = rows.child(index_row(
                     5,
                     tr("Microsoft account"),
                     Some(
                         div()
-                            .child(format!("{}.", tr(account::NEEDS_OWNER)))
+                            .child(tr(
+                                "Optional. Single player, LAN and your own worlds play without one; online servers such as Hypixel need a Microsoft account, with your name and skin.",
+                            ))
                             .into_any_element(),
                     ),
                     Some(
-                        button("gate-sign-in", "Sign in", Kind::Primary, &t)
+                        button("gate-sign-in", "Sign in", Kind::Secondary, &t)
                             .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                                 this.sign_in_to_play();
                                 cx.notify();
@@ -2691,7 +2662,9 @@ impl Launcher {
                     tr("Playing offline"),
                     Some(
                         div()
-                            .child(tr("Online servers need a Microsoft account."))
+                            .child(tr(
+                                "Optional. Online servers such as Hypixel need a Microsoft account; playing offline needs none.",
+                            ))
                             .into_any_element(),
                     ),
                     Some(
@@ -3359,7 +3332,6 @@ impl Launcher {
             )
             .child(self.collection_section(cx))
             .children(self.agents_section(cx))
-            .children(self.dev_options_section(cx))
     }
 
     /// Settings' Game arguments row: the extra arguments the game starts with, kept in
@@ -3686,7 +3658,7 @@ impl Launcher {
             Some(SignInState::Done(Ok(a))) => div().child(format!("Signed in as {}.", a.name)),
             Some(SignInState::Done(Err(e))) => div().text_color(t.danger).child(e.clone()),
             None if self.accounts.accounts.is_empty() => div().child(tr(
-                "Morizen needs a Microsoft account that owns Minecraft: Java Edition, like other launchers. It also plays online servers with your name and skin.",
+                "Optional. Single player, LAN and your own worlds play without an account; online servers such as Hypixel need a Microsoft account that owns Minecraft: Java Edition, with your name and skin.",
             )),
             None => div().child(tr("Add another account.")),
         };
@@ -4408,7 +4380,7 @@ impl Render for Launcher {
                 .line_height(px(theme::WORDMARK.px * 0.5))
                 .font_weight(FontWeight::BOLD)
                 .text_color(t.ink)
-                .children("HORIZON".chars().enumerate().map(|(i, c)| {
+                .children("MORIZEN".chars().enumerate().map(|(i, c)| {
                     let at = held - i as f32 * theme::STAGGER.as_secs_f32() * 1.5;
                     let p = ease_out_cubic(at / theme::ENTER.as_secs_f32());
                     div()
@@ -4630,22 +4602,15 @@ mod tests {
         );
     }
 
-    /// An owner's Play works on a version not prepared yet: it prepares it (downloading
-    /// Minecraft from Mojang when this computer has no install), then plays. Without an owner
-    /// it stays off: signing in comes first.
+    /// Play works on a version not prepared yet: it prepares it (from the player's own install),
+    /// then plays. No account is asked for.
     #[test]
-    fn play_prepares_first_for_an_owner() {
+    fn play_prepares_first() {
         use super::{play_press, PlayPress};
-        assert_eq!(play_press(true, Some(true), false), PlayPress::Play);
-        assert_eq!(play_press(true, None, false), PlayPress::Play);
-        assert_eq!(
-            play_press(false, Some(true), false),
-            PlayPress::PrepareThenPlay
-        );
-        assert_eq!(play_press(false, Some(false), false), PlayPress::Nothing);
-        assert_eq!(play_press(false, None, false), PlayPress::Nothing);
-        assert_eq!(play_press(false, Some(true), true), PlayPress::Nothing);
-        assert_eq!(play_press(true, Some(true), true), PlayPress::Nothing);
+        assert_eq!(play_press(true, false), PlayPress::Play);
+        assert_eq!(play_press(false, false), PlayPress::PrepareThenPlay);
+        assert_eq!(play_press(false, true), PlayPress::Nothing);
+        assert_eq!(play_press(true, true), PlayPress::Nothing);
     }
 
     /// A server's Join (and every other shortcut) waits like Play: not while the version's

@@ -33,7 +33,7 @@ Morizen itself is a **development build**, not a distribution:
 
 - The launcher still fetches releases, the mod registry and its own updates from `horizon-rust/horizon`,
   so a Morizen launcher installs Horizon builds.
-- The app icon and the brand images are still Horizon's violet artwork.
+- Some internal package names and file paths still use `horizon` for compatibility.
 - Some docs still describe Horizon, and the game's own screens still say "Horizon Settings".
 
 ## Build from source

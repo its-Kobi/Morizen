@@ -74,6 +74,7 @@ pub enum SourceId {
     Modrinth,
     CurseForge,
     /// Morizen's own registry of reviewed mods, modpacks and resource packs ([`horizon`]).
+    #[serde(alias = "horizon")]
     Morizen,
 }
 

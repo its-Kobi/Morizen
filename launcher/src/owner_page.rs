@@ -1,26 +1,19 @@
-//! The owner gate in the window (`horizon_launcher::account::launch`): the screen that asks for a
-//! Microsoft account that owns Minecraft: Java Edition. It covers the launcher once for players
-//! without one (those who played offline before the gate), and again whenever Play is refused.
-//! The sign-in runs on it, code and all.
+//! The Microsoft account screen (`horizon_launcher::account`): it asks for a Microsoft account
+//! that owns Minecraft: Java Edition, which only downloading the game and online servers need.
+//! Nothing opens it on its own: the player asks for it (Settings' account row, "Sign in to
+//! download", or an account row). The sign-in runs on it, code and all.
 use super::*;
 
 impl Launcher {
-    /// Whether the screen covers the window: no owner, and either Play was refused or the player
-    /// hasn't read it yet. The data question comes first.
+    /// Whether the screen covers the window: the player asked to sign in (Settings' account
+    /// row or a download) and nothing more urgent is up. The data question comes first.
     pub(crate) fn asking_owner(&self) -> bool {
-        self.owner_shown() == Some(false)
-            && (self.owner_screen_open || !self.settings.owner_notice_seen)
-            && !self.asking_consent()
-            && self.opening.is_none()
+        self.owner_screen_open && !self.asking_consent() && self.opening.is_none()
     }
 
-    /// `owner` as the window shows it: the developer option that lets offline names play without
-    /// an owner (`dev_options`) hides the gate, as if the keychain hadn't answered yet.
+    /// `owner` as the window shows it: the keychain's last answer, none until it gives one.
     pub(crate) fn owner_shown(&self) -> Option<bool> {
-        match self.owner {
-            Some(false) if self.settings.dev_offline => None,
-            owner => owner,
-        }
+        self.owner
     }
 
     /// Opens the screen and starts the sign-in on it.
@@ -29,17 +22,13 @@ impl Launcher {
         self.start_sign_in();
     }
 
-    /// Closes it; it comes back with the next refused Play.
+    /// Closes it; it opens again when the player asks to sign in.
     fn close_owner_screen(&mut self) {
         if let Some(s) = self.sign_in.take() {
             s.cancel();
         }
         self.sign_in_state = None;
         self.owner_screen_open = false;
-        if !self.settings.owner_notice_seen {
-            self.settings.owner_notice_seen = true;
-            self.settings.save();
-        }
     }
 
     pub(crate) fn owner_screen(&mut self, cx: &mut Context<Self>) -> Stateful<Div> {
@@ -54,10 +43,10 @@ impl Launcher {
             .child(
                 text(theme::HEADING)
                     .text_color(t.ink)
-                    .child(format!("{}.", tr(account::NEEDS_OWNER))),
+                    .child(tr("Sign in with a Microsoft account")),
             )
             .child(text(theme::UI).text_color(t.muted).child(tr(
-                "Morizen needs a Microsoft account that owns Minecraft: Java Edition, like other launchers.",
+                "Only online servers and downloading Minecraft from Mojang need one. Playing alone, with friends on your network, or on your own worlds does not.",
             )))
             .child(text(theme::UI).text_color(t.muted).child(tr(
                 "Your worlds, offline names and settings stay where they are.",

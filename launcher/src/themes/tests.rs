@@ -10,7 +10,7 @@ fn blend(top: u32, under: u32, alpha: f32) -> u32 {
 }
 
 #[test]
-fn every_accent_reads_as_well_as_the_violet() {
+fn every_accent_reads_as_well_as_the_gold() {
     for base in [BLOCKS_DARK, BLOCKS_LIGHT] {
         for accent in Accent::ALL {
             let p = accent.apply(base);
@@ -33,15 +33,15 @@ fn every_accent_reads_as_well_as_the_violet() {
                 hsl(p.face_bevel).2 > face && hsl(p.face_lip).2 < face,
                 "{what}"
             );
-            if accent != Accent::Violet {
+            if accent != Accent::Gold {
                 let (h, _, _) = hsl(p.face);
                 let want = accent.hue().unwrap();
                 let off = ((h - want).rem_euclid(360.)).min((want - h).rem_euclid(360.));
                 assert!(off < 3., "{what}: face hue {h:.0}, not {want}");
             }
         }
-        let violet = Accent::Violet.apply(base);
-        assert_eq!((violet.accent, violet.face), (base.accent, base.face));
+        let gold = Accent::Gold.apply(base);
+        assert_eq!((gold.accent, gold.face), (base.accent, base.face));
     }
 }
 
@@ -54,7 +54,8 @@ fn colours_go_to_hsl_and_back() {
         assert_eq!(from_hsl(h, s, l), c, "{c:06x}");
     }
     assert_eq!(Accent::parse("Teal"), Some(Accent::Teal));
-    assert_eq!(Accent::parse("purple"), Some(Accent::Violet));
+    assert_eq!(Accent::parse("purple"), Some(Accent::Gold));
+    assert_eq!(Accent::parse("violet"), Some(Accent::Gold));
     assert_eq!(Accent::parse("chartreuse"), None);
     assert_eq!(serde_json::to_string(&Accent::Amber).unwrap(), "\"amber\"");
 }
