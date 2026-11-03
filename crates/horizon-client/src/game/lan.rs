@@ -1611,6 +1611,10 @@ impl Game<'_> {
                     HostEvent::PlayerChat { .. } => {}
                     HostEvent::Joined(conn) => {
                         self.lan_guest_joined(&mut host, conn, state.as_ref(), entities, spawn);
+                        #[cfg(feature = "java-mods")]
+                        if let Some(name) = host.hub.guest(conn).map(|guest| guest.name.clone()) {
+                            self.java_player_join(&name);
+                        }
                         if self.options.dedicated.is_some()
                             && let Some(g) = host.hub.guest(conn)
                         {
@@ -1646,6 +1650,8 @@ impl Game<'_> {
                         }
                     }
                     HostEvent::Left(mut guest) => {
+                        #[cfg(feature = "java-mods")]
+                        self.java_player_leave(&guest.name);
                         // The container they had open loses an opener.
                         if let Some(pos) = guest.menu.as_ref().and_then(|m| m.pos)
                             && !guest.spectator()

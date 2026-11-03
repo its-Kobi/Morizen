@@ -533,6 +533,82 @@ impl<'a> Plan<'a> {
         Ok(())
     }
 
+    /// Adds every content item to the creative inventory. The modern export
+    /// keeps a parallel tooltip/tag row for each search entry; generated Java
+    /// registrations have neither, so their rows are empty. A normal category
+    /// also receives them, preferring Ingredients when vanilla exported it.
+    #[cfg(feature = "java-mods")]
+    fn creative(&self, doc: &mut J, modern: bool) -> Result<()> {
+        let ids: Vec<String> = self
+            .items
+            .iter()
+            .map(|item| item.rename.to.clone())
+            .collect();
+        if ids.is_empty() {
+            return Ok(());
+        }
+        if !modern {
+            let J::Arr(tabs) = doc else {
+                return Err("creative-tabs.json is not a list".into());
+            };
+            let tab = tabs.iter_mut().find(|tab| {
+                !matches!(
+                    tab.get("id"),
+                    Some(J::Str(id)) if id == "minecraft:hotbar" || id == "minecraft:op_blocks"
+                )
+            });
+            let Some(J::Arr(items)) = tab.and_then(|tab| tab.get_mut("items")) else {
+                return Err("creative-tabs.json has no item category".into());
+            };
+            append_ids(items, &ids);
+            return Ok(());
+        }
+
+        let Some(J::Arr(tabs)) = doc.at("tabs") else {
+            return Err("creative-inventory.json has no tabs".into());
+        };
+        let category = tabs
+            .iter()
+            .position(|tab| tab.get("id") == Some(&J::Str("minecraft:ingredients".into())))
+            .or_else(|| {
+                tabs.iter().position(|tab| {
+                    matches!(tab.get("visible"), None | Some(J::Bool(true)))
+                        && !matches!(
+                            tab.get("type"),
+                            Some(J::Str(kind))
+                                if matches!(kind.as_str(), "SEARCH" | "HOTBAR" | "INVENTORY")
+                        )
+                })
+            });
+        if let Some(tab) = category.and_then(|index| tabs.get_mut(index))
+            && let Some(J::Arr(items)) = tab.get_mut("items")
+        {
+            append_ids(items, &ids);
+        }
+        let Some(search) = tabs
+            .iter_mut()
+            .find(|tab| tab.get("type") == Some(&J::Str("SEARCH".into())))
+        else {
+            return Err("creative-inventory.json has no search tab".into());
+        };
+        let existing = match search.get("items") {
+            Some(J::Arr(items)) => items.len(),
+            _ => return Err("creative search tab has no items".into()),
+        };
+        let Some(J::Arr(items)) = search.get_mut("items") else {
+            unreachable!();
+        };
+        append_ids(items, &ids);
+        let added = items.len().saturating_sub(existing);
+        for key in ["lines", "tags"] {
+            let Some(J::Arr(rows)) = search.get_mut(key) else {
+                return Err(format!("creative search tab has no {key}").into());
+            };
+            rows.extend((0..added).map(|_| J::Arr(Vec::new())));
+        }
+        Ok(())
+    }
+
     /// One JSON table, rewritten.
     fn json(&self, name: &str, doc: &mut J) -> Result<()> {
         let states = |doc: &mut J, path: &str, ids: bool, gameplay: bool| -> Result<()> {
@@ -588,6 +664,10 @@ impl<'a> Plan<'a> {
                 }
             }
             "items.json" => self.items(doc, true)?,
+            #[cfg(feature = "java-mods")]
+            "creative-inventory.json" => self.creative(doc, true)?,
+            #[cfg(feature = "java-mods")]
+            "creative-tabs.json" => self.creative(doc, false)?,
             "registries.json" => {
                 // Network ids: the game and its server map items and blocks through
                 // this report, so new ones get the ids after vanilla's, in plan order.
@@ -698,7 +778,37 @@ impl<'a> Plan<'a> {
     }
 }
 
+#[cfg(feature = "java-mods")]
+fn append_ids(items: &mut Vec<J>, ids: &[String]) {
+    for id in ids {
+        let value = J::Str(id.clone());
+        if !items.contains(&value) {
+            items.push(value);
+        }
+    }
+}
+
 /// The JSON and NBT tables rewritten for new blocks and items.
+#[cfg(feature = "java-mods")]
+const JSON_TABLES: [&str; 16] = [
+    "facts.json",
+    "registries.json",
+    "gameplay-facts.json",
+    "block-behaviours.json",
+    "model-states.json",
+    "render-definitions.json",
+    "landing-definitions.json",
+    "items.json",
+    "creative-inventory.json",
+    "creative-tabs.json",
+    "command-registries.json",
+    "mob-data.json",
+    "worldgen/block_flags.json",
+    "worldgen/blocks/structure-blocks.json",
+    "worldgen/blocks/survival-rules.json",
+    "worldgen/blocks/survival-extra-definitions.json",
+];
+#[cfg(not(feature = "java-mods"))]
 const JSON_TABLES: [&str; 14] = [
     "facts.json",
     "registries.json",

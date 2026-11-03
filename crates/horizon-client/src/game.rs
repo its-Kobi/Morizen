@@ -79,6 +79,8 @@ mod initial_spawn;
 mod integrated;
 mod item_draw;
 mod item_particles;
+#[cfg(feature = "java-mods")]
+mod java_mods;
 mod jukebox;
 mod lan;
 mod lan_actions;
@@ -516,6 +518,11 @@ impl Options {
                 Err(e) => eprintln!("Horizon: not signed in: {e}"),
             }
         }
+        // Content packages produced by the embedded Java bridge are ordinary
+        // dev mods, so they take the same path as any other content mod.
+        #[cfg(feature = "java-mods")]
+        o.dev_mods
+            .extend(horizon_client::java_mods::content_paths().iter().cloned());
         Ok(Some(o))
     }
 }
@@ -1479,6 +1486,8 @@ struct Game<'a> {
     lod_covered_at: Option<(u64, (i32, i32), i32)>,
     options: Options,
     player: Option<PlayerMotion>,
+    #[cfg(feature = "java-mods")]
+    java_handles: java_mods::JavaHandles,
     spawn: Option<Vec3>,
     clock: FixedStep,
     previous_position: Vec3,
@@ -4374,6 +4383,12 @@ impl Game<'_> {
     /// One hand's turn in `startUseItem`: `useItemOn` the block aimed at,
     /// then `useItem`. Whether the click ends here (it acted or failed).
     fn use_hand(&mut self, block_hit: Option<&Hit>) -> Result<bool> {
+        #[cfg(feature = "java-mods")]
+        if let Some(hit) = block_hit
+            && self.java_block_interact(hit.pos)
+        {
+            return Ok(true);
+        }
         // isSecondaryUseActive with something in either hand keeps blocks
         // from reacting.
         let sneaking = self.keys.contains(&KeyCode::ShiftLeft);
@@ -5256,6 +5271,8 @@ impl Game<'_> {
         if self.agent.hold_server {
             return Ok(());
         }
+        #[cfg(feature = "java-mods")]
+        self.java_tick();
         self.tick_debug_keys()?;
         self.tick_debug_charts();
         self.tick_tutorial();
@@ -9691,6 +9708,8 @@ impl Game<'_> {
         Ok(())
     }
     fn close_world(&mut self) -> Result<()> {
+        #[cfg(feature = "java-mods")]
+        self.java_handles.clear();
         self.clear_waypoints();
         self.begin_closing_save(false)
     }
@@ -13019,8 +13038,11 @@ impl ApplicationHandler for Game<'_> {
         let fullscreen = self.settings.fullscreen;
         let size = self.options.window_size.map(f64::from);
         self.fullscreen = horizon_client::window::FullscreenState::new(fullscreen);
+        // Hidden until the first frame: before then the window is an empty
+        // white rectangle (Windows paints it before anything is presented).
         let attributes = Window::default_attributes()
-            .with_title("Horizon")
+            .with_title(horizon_theme::PRODUCT_NAME)
+            .with_visible(false)
             .with_window_icon(horizon_client::window::icon());
         // Wayland names the window by its app id, which the horizon.desktop entry matches.
         #[cfg(target_os = "linux")]
@@ -13989,6 +14011,11 @@ impl ApplicationHandler for Game<'_> {
                         self.frame_stats.record(elapsed.as_secs_f32() * 1000.0);
                         self.debug_charts.frame_times.log(elapsed.as_nanos() as i64);
                         if self.frames == 0 {
+                            // The window was created hidden (see `resumed`): show
+                            // it now that there is a real frame behind it.
+                            if let Some(window) = &self.window {
+                                window.set_visible(true);
+                            }
                             // The launcher times Play to this line (launcher/src/perf.rs).
                             log::info!(
                                 "Horizon: first frame after {} ms",
@@ -14211,6 +14238,8 @@ impl<'a> Game<'a> {
             lod_covered_at: None,
             options,
             player: None,
+            #[cfg(feature = "java-mods")]
+            java_handles: java_mods::JavaHandles::new(),
             spawn: None,
             clock: FixedStep::default(),
             previous_position: Vec3::ZERO,
@@ -15555,8 +15584,11 @@ impl Loading {
             .map_or([1280, 720], |o| o.window_size)
             .map(f64::from);
         self.fullscreen = horizon_client::window::FullscreenState::new(fullscreen);
+        // Hidden until the first frame: before then the window is an empty
+        // white rectangle (Windows paints it before anything is presented).
         let attributes = Window::default_attributes()
-            .with_title("Horizon")
+            .with_title(horizon_theme::PRODUCT_NAME)
+            .with_visible(false)
             .with_window_icon(horizon_client::window::icon());
         // Wayland names the window by its app id, which the horizon.desktop entry matches.
         #[cfg(target_os = "linux")]
@@ -15677,17 +15709,24 @@ impl Loading {
             self.started.elapsed().as_secs_f32(),
             self.settings.file.double("panoramaScrollSpeed") as f32,
         );
+        let mut rendered = false;
         if let Some(renderer) = &mut self.renderer {
             match renderer.render(&frame) {
                 Ok(true) if self.gui.is_some() && self.menu.pending.is_none() => {
+                    rendered = true;
                     self.menu.perf.title_shown()
                 }
-                Ok(_) => {}
+                Ok(_) => rendered = true,
                 Err(e) => log::warn!("Horizon: loading screen frame failed: {e}"),
             }
         }
-        if !self.shown {
+        if rendered && !self.shown {
             self.shown = true;
+            // The window was created hidden (see `resumed`): show it once there
+            // is a real frame, not an empty white rectangle.
+            if let Some(window) = &self.window {
+                window.set_visible(true);
+            }
             log::info!(
                 "Horizon: loading screen shown after {} ms",
                 self.started.elapsed().as_millis()

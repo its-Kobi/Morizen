@@ -114,6 +114,17 @@ fn allocated_ids_follow_mod_and_entry_order_after_vanilla() {
             "minecraft:iron_block":{"protocol_id":11}}}}"#,
     )
     .unwrap();
+    #[cfg(feature = "java-mods")]
+    fs::write(
+        base.join("creative-inventory.json"),
+        r#"{"tabs":[
+            {"id":"minecraft:ingredients","type":"CATEGORY","visible":true,
+             "items":["minecraft:stone"]},
+            {"id":"minecraft:search","type":"SEARCH","visible":true,
+             "items":["minecraft:stone"],"lines":[[]],"tags":[[]]}
+        ]}"#,
+    )
+    .unwrap();
     fs::create_dir_all(base.join("assets/minecraft/blockstates")).unwrap();
     fs::write(
         base.join("assets/minecraft/blockstates/iron_block.json"),
@@ -200,6 +211,32 @@ fn allocated_ids_follow_mod_and_entry_order_after_vanilla() {
         assert_eq!(id("minecraft:block", "minecraft:iron_block"), 11);
         assert_eq!(id("minecraft:block", "alpha:zblock"), 12);
         assert_eq!(id("minecraft:block", "ruby:zblock"), 13);
+
+        #[cfg(feature = "java-mods")]
+        let mut creative: J =
+            serde_json::from_slice(&fs::read(base.join("creative-inventory.json")).unwrap())
+                .unwrap();
+        #[cfg(feature = "java-mods")]
+        plan.json("creative-inventory.json", &mut creative).unwrap();
+        #[cfg(feature = "java-mods")]
+        let creative: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&creative).unwrap()).unwrap();
+        #[cfg(feature = "java-mods")]
+        let expected = serde_json::json!([
+            "minecraft:stone",
+            "alpha:aitem",
+            "alpha:zblock",
+            "ruby:aitem",
+            "ruby:zblock"
+        ]);
+        #[cfg(feature = "java-mods")]
+        assert_eq!(creative["tabs"][0]["items"], expected);
+        #[cfg(feature = "java-mods")]
+        assert_eq!(creative["tabs"][1]["items"], expected);
+        #[cfg(feature = "java-mods")]
+        assert_eq!(creative["tabs"][1]["lines"].as_array().unwrap().len(), 5);
+        #[cfg(feature = "java-mods")]
+        assert_eq!(creative["tabs"][1]["tags"].as_array().unwrap().len(), 5);
         drop(plan);
 
         let output = scratch.join(format!("output-{index}"));
@@ -210,6 +247,12 @@ fn allocated_ids_follow_mod_and_entry_order_after_vanilla() {
             built, registry,
             "the built root must use the tested allocation"
         );
+        #[cfg(feature = "java-mods")]
+        let built_creative: serde_json::Value =
+            serde_json::from_slice(&fs::read(output.join("creative-inventory.json")).unwrap())
+                .unwrap();
+        #[cfg(feature = "java-mods")]
+        assert_eq!(built_creative, creative);
         mods.reverse();
     }
     fs::remove_dir_all(scratch).unwrap();
@@ -440,6 +483,19 @@ fn content_root_loads_with_every_table() {
     assert!(pickaxe.contains("minecraft:stone"));
     // Convention tags load, with the ids nobody registers dropped.
     assert_eq!(items.item_tag_order["c:gems/ruby"], ["ruby:ruby"]);
+    #[cfg(feature = "java-mods")]
+    {
+        let creative = crate::creative::Creative::load(&root).unwrap();
+        let search: BTreeSet<&str> = creative
+            .search_items()
+            .iter()
+            .map(|stack| stack.item.as_ref())
+            .collect();
+        for id in ["ruby:ruby_block", "ruby:ruby_door", "ruby:ruby"] {
+            assert!(search.contains(id), "creative search is missing {id}");
+        }
+        assert!(!search.contains("ruby:ruby_glass"));
+    }
 
     crate::collisions::load(&root, new).unwrap();
     crate::models::load_visibility(&root, new).unwrap();

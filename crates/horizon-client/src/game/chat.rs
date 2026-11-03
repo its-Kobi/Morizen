@@ -713,15 +713,23 @@ impl Game<'_> {
         // On a server (single player's own included) the server runs it,
         // unless a client mod owns the command.
         if self.remote.is_some() {
-            if let Some(command) = message.strip_prefix('/')
-                && self.client_mod_command(command)
-            {
-                return;
+            if let Some(command) = message.strip_prefix('/') {
+                #[cfg(feature = "java-mods")]
+                if self.java_command(command) {
+                    return;
+                }
+                if self.client_mod_command(command) {
+                    return;
+                }
             }
             self.send_chat(message);
             return;
         }
         if let Some(command) = message.strip_prefix('/') {
+            #[cfg(feature = "java-mods")]
+            if self.java_command(command) {
+                return;
+            }
             // A native mod's command first.
             if !self.client_mod_command(command) {
                 self.run_command(command);

@@ -40,6 +40,11 @@ fn main() {
             }
         }
     };
+    #[cfg(feature = "java-mods")]
+    if let Some(host) = &_java_mod_host {
+        horizon_client::java_mods::set_content_paths(host.summary().content_mods.clone());
+        horizon_client::java_mods::set_dispatcher(host.dispatcher());
+    }
     if let Err(error) = game::run() {
         log::error!("Horizon: {error}");
         if !help {

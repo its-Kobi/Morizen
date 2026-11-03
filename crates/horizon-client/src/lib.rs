@@ -142,3 +142,32 @@ pub use horizon_items::enchant;
 pub use horizon_items::item_data;
 pub use horizon_items::items;
 pub use horizon_items::random_sequences;
+
+/// Content mods produced by the embedded Java bridge (Cargo feature `java-mods`).
+#[cfg(feature = "java-mods")]
+pub mod java_mods {
+    use morizen_jvm::JavaModDispatcher;
+    use std::path::PathBuf;
+    use std::sync::OnceLock;
+
+    static CONTENT: OnceLock<Vec<PathBuf>> = OnceLock::new();
+    static DISPATCHER: OnceLock<JavaModDispatcher> = OnceLock::new();
+
+    /// Called once by `main` after the Java entrypoints have committed.
+    pub fn set_content_paths(paths: Vec<PathBuf>) {
+        let _ = CONTENT.set(paths);
+    }
+
+    /// The generated content-mod folders, ready for `--dev-mod`.
+    pub fn content_paths() -> &'static [PathBuf] {
+        CONTENT.get().map(Vec::as_slice).unwrap_or(&[])
+    }
+
+    pub fn set_dispatcher(dispatcher: JavaModDispatcher) {
+        let _ = DISPATCHER.set(dispatcher);
+    }
+
+    pub fn dispatcher() -> Option<&'static JavaModDispatcher> {
+        DISPATCHER.get()
+    }
+}
