@@ -10,5 +10,5 @@ mod jdk;
 
 pub use config::{CONFIG_ENV, ConfiguredMod, LaunchConfig};
 pub use error::{BridgeError, Result};
-pub use host::{JavaModHost, LaunchSummary};
+pub use host::{JavaModDispatcher, JavaModHost, LaunchSummary};
 pub use jdk::{JdkInfo, REQUIRED_JAVA_MAJOR};

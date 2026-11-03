@@ -136,6 +136,14 @@ public final class MorizenGameProvider implements GameProvider {
     @Override
     public void unlockClassPath(FabricLauncher launcher) {
         launcher.addToClassPath(bootstrapJar);
+        String shims = System.getProperty("morizen.shimsJar");
+        if (shims != null && !shims.isBlank()) {
+            Path shimJar = Path.of(shims).toAbsolutePath().normalize();
+            if (!Files.isRegularFile(shimJar)) {
+                throw new IllegalStateException("Morizen shim JAR does not exist: " + shimJar);
+            }
+            launcher.addToClassPath(shimJar);
+        }
     }
 
     @Override
@@ -166,12 +174,34 @@ public final class MorizenGameProvider implements GameProvider {
         return targetLoader;
     }
 
+    /** Called by the Rust owner thread for one bounded lifecycle/event batch. */
+    public static String dispatchActive(String wire) {
+        ClassLoader targetLoader = getActiveTargetLoader();
+        Object result = invokeBootstrapResult(
+                targetLoader, "dispatch", new Class<?>[] {String.class}, wire);
+        if (!(result instanceof String actions)) {
+            throw new IllegalStateException("Morizen bootstrap dispatch returned no action batch");
+        }
+        return actions;
+    }
+
+    public static boolean hasCallbacksActive() {
+        Object result = invokeBootstrapResult(
+                getActiveTargetLoader(), "hasCallbacks", new Class<?>[0]);
+        return Boolean.TRUE.equals(result);
+    }
+
     private static void invokeBootstrap(
+            ClassLoader targetLoader, String methodName, Class<?>[] parameterTypes, Object... arguments) {
+        invokeBootstrapResult(targetLoader, methodName, parameterTypes, arguments);
+    }
+
+    private static Object invokeBootstrapResult(
             ClassLoader targetLoader, String methodName, Class<?>[] parameterTypes, Object... arguments) {
         try {
             Class<?> bootstrap = Class.forName(BOOTSTRAP_CLASS, true, targetLoader);
             Method method = bootstrap.getMethod(methodName, parameterTypes);
-            method.invoke(null, arguments);
+            return method.invoke(null, arguments);
         } catch (InvocationTargetException error) {
             Throwable cause = error.getCause();
             if (cause instanceof Error fatal) {

@@ -1,9 +1,12 @@
 # Java mod bridge: embedded Fabric in native Morizen
 
-Status: **Phase 1 implemented and demonstrated locally** (2026-11-02). Real Fabric Loader runs in
-an embedded JVM and invokes a purpose-built mod's `main` and `client` code. No Minecraft API shim,
-registry content or real-world mod functionality is claimed yet. The implementation is developed
-only on `feature/java-mod-bridge` and is off unless the game is built with Cargo feature `java-mods`.
+Status: **vertical phase gates 1-7 implemented and demonstrated locally** (2026-11-02). Real Fabric
+Loader 0.19.5 and Quilt Loader 0.30.2 run in the embedded JVM. Generated 26.3 shims support the
+tracked block/item surface, lifecycle batches, generation handles, immutable snapshots and one
+transformed-shim Mixin pattern. This is measured partial compatibility, not a claim that arbitrary
+mods or Mixins work. NeoForge has no 26.3 release; Forge 26.3 needs the separate launch-service
+design recorded below and is still reported unsupported. The implementation remains only on
+`feature/java-mod-bridge` and off unless Cargo feature `java-mods` is selected.
 
 ## Goal and hard boundary
 
@@ -503,9 +506,115 @@ fresh local config path. Then run
 working platform C toolchain and setting `MORIZEN_JAVA_MOD_CONFIG` to that config while building with
 `--features java-mods`. There is deliberately no launcher UI before Phase 2.
 
-Phase 2 still needs signature-only local shim generation, native registration calls, block/item
-transactions and resource mounting. It must also prove a feature-off client executable is identical
-to the base build on a machine that can compile the client.
+### Phase 2 result — generated shims and native registries
+
+`compat-java/shim-surface.json` tracks 12 classes and their exact descriptors. `tools/gen_compat.py`
+checks every non-extension member against the user's SHA-1-pinned 26.3 jar while skipping all Code
+attributes, emits sources only under `.local/`, and compiles `morizen-shims.jar`. The local check
+matched all 12 classes against client SHA-1 `e877b6a07acd633fb3bb475002175cec036e7b87`.
+
+The real Fabric test mod `morizen_registry` uses `Registry.register`, `BuiltInRegistries`, `Block`,
+`BlockItem`, `Item` and their Properties classes. It registered two blocks and two item forms. Java
+wrote one atomic namespace transaction after entrypoints; Rust validated it and generated a normal
+content mod containing declarations, blockstates, models, deterministic PNG textures and
+translations. The ordinary content pipeline assigns block/item/network/command IDs and, only in a
+`java-mods` build, adds the generated entries to the category and search creative tabs. Foreign
+namespaces, duplicates, invalid templates, non-finite properties and transactions over 4096 entries
+are refused before any content is applied.
+
+The test output ended with:
+
+```text
+morizen-java: registry block morizen_registry:ruby_block
+morizen-java: registry item morizen_registry:ruby_block (block item)
+morizen-java: registry item morizen_registry:ruby
+morizen-java: registry block morizen_registry:ruby_lamp
+morizen-java: registry transaction .../morizen_registry.json
+morizen-java: content=.../morizen_registry id=morizen_registry blocks=2 items=1
+morizen-java: Phase 2 registry transaction and content package passed
+```
+
+Prepared 26.3 resources now exist locally, including `VanillaCreativeTabsExporter`; no Mojang file
+or generated shim is tracked. The client checks with and without `java-mods` pass on the installed
+MinGW toolchain. The actual offscreen world proof and feature-off executable hash are recorded in the
+final command table below rather than inferred from package generation.
+
+### Phase 3 result — lifecycle/event batches
+
+`JavaModDispatcher` is a cloneable channel endpoint with no JNI state. It sends validated batches to
+the sole JVM owner thread and waits at most `event_timeout_ms` (250 ms by default). The Java side
+freezes callback registration at `start`, requires globally increasing sequence numbers, runs every
+callback on thread `Java mods`, caps a batch at 256 events/actions and 2 MiB, disables a failing mod's
+callbacks, and dispatches `stop` exactly once before the VM is destroyed. Game seams now emit client
+and server ticks, LAN join/leave, block interaction and commands; returned chat, command, cancel,
+set-block and give-item actions are applied only after Java returns.
+
+`lifecycle` plus `lifecycle-failing` proved: start → ticks → join → interaction → command → leave →
+stop ordering; two events in one JNI call; one expected callback exception disabling only that mod;
+and dispatch refusal after stop. No `JNIEnv`, `Game` borrow or pointer crosses the channel.
+
+### Phase 4 result — handles and snapshots
+
+`HandleTable<T>` encodes `(generation, slot + 1)` in a nonzero `u64`. Remove, slot reuse and world
+clear increment generations; malformed and stale handles do not resolve. Feature-on `Game` instances
+allocate world/player handles and invalidate them on world close. Canonical bounded snapshot DTOs
+cover block states/properties, entities, item stacks, components and typed NBT, rejecting non-finite
+numbers, invalid IDs, excessive counts and NBT deeper than 32 levels.
+
+The lifecycle integration sent Java a canonical world snapshot containing a generated ruby lamp,
+player entity, ruby stack and `minecraft:custom_data`; Java validated its handles/data and returned a
+give-item action. Rust then invalidated the player and stack handles and proved both stale lookups
+failed. This is the supported snapshot/transport slice; broad vanilla world/entity methods remain
+`partial` in the ledger.
+
+### Phase 5 result — high-frequency transport slice
+
+The same bounded action protocol has typed payload, screen, render, sound, recipe and loot event/action
+kinds. The integration test returned one action for each low-frequency kind, then sent the maximum
+256 render events in one JNI call and received one bounded empty action batch. The transport and call
+budget are supported; actual Fabric networking, screen widgets, render graph hooks, sound instances,
+recipe mutation and loot APIs remain explicitly `partial`, not credited as complete compatibility.
+
+### Phase 6 result — transformed shim
+
+`morizen_mixin_head` has a required Mixin config targeting the generated
+`Block.defaultBlockState()` method. Knot transformed that ordinary shim body and a real
+`@Inject(at = @At("HEAD"))` callback ran before the mod's Fabric entrypoint completed:
+
+```text
+morizen-java: mixin-head head
+morizen-java: mixin-head main
+morizen-java: Phase 6 transformed-shim HEAD callback passed
+```
+
+Only this HEAD callback pattern receives ledger credit. Redirects, local/constant/ordinal-sensitive
+injections and arbitrary overwrites remain unsupported because generated shims intentionally contain
+no Mojang implementation bytecode.
+
+### Phase 7 result — Quilt, and Forge-family boundary
+
+Quilt Loader 0.30.2, quilt-json5 1.0.4+final and quilt-config 1.3.3 are hash pinned in
+`compat-java/quilt.lock.json`. A distinct service-loaded `MorizenQuiltGameProvider` advertises the
+official namespace, mounts the same bootstrap/shims, and runs under the same Rust JVM owner. A real
+`quilt.mod.json` artifact was discovered as a Quilt mod and its `morizen` entrypoint ran on `Java
+mods`; the compatibility report correctly names loader `quilt@0.30.2`.
+
+Forge-family support cannot reuse either Knot provider:
+
+- **NeoForge:** its release metadata on 2026-11-02 ends at `26.1.2.126`; there is no NeoForge build
+  for Minecraft 26.3 to pin or test. Morizen therefore refuses to invent a 26.3 contract.
+- **Forge:** Forge `26.3-66.1.3` exists, but its ModLauncher launch service, FML mod-discovery
+  language providers, event buses, access transformers and patched-game bootstrap are not a
+  `GameProvider`. Starting the published client launch target would start/patch Mojang's Java game,
+  which this bridge forbids.
+
+The required Forge design is a Morizen ModLauncher launch service whose target is a committed
+bootstrap class, with a separate FML compatibility jar for `@Mod`, deferred registries and event bus
+events. It must mount generated shims as the game layer, translate access transformers against those
+shims, and use the existing batch/action ABI. NeoForge needs its own independently pinned service and
+event contract once a 26.3 release exists. Neither may masquerade as Fabric, directly invoke mod
+constructors, or put the Mojang client jar on the runtime classpath. Until those loader-specific
+gates exist, both entries remain `unsupported` in `compat-ledger.json`.
 
 | Phase | Required demo and gate |
 |---:|---|

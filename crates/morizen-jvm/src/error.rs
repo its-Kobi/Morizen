@@ -22,6 +22,10 @@ pub enum BridgeError {
     Thread(String),
     #[error("compatibility report failed: {0}")]
     Report(String),
+    #[error("Java mod registry transaction was refused: {0}")]
+    Registry(String),
+    #[error("Java mod event batch failed: {0}")]
+    Event(String),
 }
 
 impl From<jni::errors::Error> for BridgeError {

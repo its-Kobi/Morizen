@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "minecraft": "26.3",
-  "loader": "fabric-0.19.5",
+  "loader": "fabric-0.19.5 + quilt-0.30.2",
   "areas": [
     {
       "id": "loader",
@@ -14,7 +14,8 @@
         {"id": "client-entrypoint", "status": "supported", "weight": 1, "evidence": "empty"},
         {"id": "server-entrypoint", "status": "unsupported", "weight": 1, "phase": 3},
         {"id": "nested-jars", "status": "unsupported", "weight": 1, "phase": 6},
-        {"id": "mixin-targets", "status": "unsupported", "weight": 5, "phase": 6},
+        {"id": "mixin-head-callback", "status": "supported", "weight": 1, "phase": 6, "evidence": "mixin-head"},
+        {"id": "mixin-instruction-sensitive", "status": "unsupported", "weight": 4, "phase": 6},
         {"id": "access-wideners", "status": "unsupported", "weight": 2, "phase": 6}
       ]
     },
@@ -22,42 +23,65 @@
       "id": "registries-resources",
       "phase": 2,
       "members": [
-        {"id": "blocks", "status": "unsupported", "weight": 5},
-        {"id": "items", "status": "unsupported", "weight": 5},
-        {"id": "creative-inventory", "status": "unsupported", "weight": 2},
-        {"id": "assets", "status": "unsupported", "weight": 4}
+        {"id": "blocks", "status": "supported", "weight": 5, "evidence": "registry"},
+        {"id": "items", "status": "supported", "weight": 5, "evidence": "registry"},
+        {"id": "creative-inventory", "status": "supported", "weight": 2, "evidence": "registry"},
+        {"id": "assets", "status": "supported", "weight": 4, "evidence": "registry"}
       ]
     },
     {
       "id": "lifecycle-events-commands",
       "phase": 3,
       "members": [
-        {"id": "server-lifecycle", "status": "unsupported", "weight": 3},
-        {"id": "ticks", "status": "unsupported", "weight": 3},
-        {"id": "player-join", "status": "unsupported", "weight": 2},
-        {"id": "block-interaction", "status": "unsupported", "weight": 2},
-        {"id": "commands", "status": "unsupported", "weight": 2}
+        {"id": "batched-event-transport", "status": "supported", "weight": 2, "evidence": "lifecycle"},
+        {"id": "callback-isolation", "status": "supported", "weight": 1, "evidence": "lifecycle"},
+        {"id": "action-bounds", "status": "supported", "weight": 1, "evidence": "lifecycle"},
+        {"id": "server-lifecycle", "status": "partial", "weight": 3},
+        {"id": "ticks", "status": "partial", "weight": 3},
+        {"id": "player-join", "status": "partial", "weight": 2},
+        {"id": "block-interaction", "status": "partial", "weight": 2},
+        {"id": "commands", "status": "partial", "weight": 2}
       ]
     },
     {
       "id": "world-entities-components",
       "phase": 4,
       "members": [
-        {"id": "block-state-world", "status": "unsupported", "weight": 6},
-        {"id": "entities", "status": "unsupported", "weight": 5},
-        {"id": "item-stack", "status": "unsupported", "weight": 4},
-        {"id": "nbt-components", "status": "unsupported", "weight": 4}
+        {"id": "generation-handles", "status": "supported", "weight": 2, "evidence": "lifecycle"},
+        {"id": "snapshot-wire", "status": "supported", "weight": 2, "evidence": "lifecycle"},
+        {"id": "block-state-world", "status": "partial", "weight": 6},
+        {"id": "entities", "status": "partial", "weight": 5},
+        {"id": "item-stack", "status": "partial", "weight": 4},
+        {"id": "nbt-components", "status": "partial", "weight": 4}
       ]
     },
     {
       "id": "network-ui-render-data",
       "phase": 5,
       "members": [
-        {"id": "custom-payloads", "status": "unsupported", "weight": 4},
-        {"id": "screens-gui", "status": "unsupported", "weight": 4},
-        {"id": "rendering", "status": "unsupported", "weight": 6},
-        {"id": "sounds", "status": "unsupported", "weight": 2},
-        {"id": "recipes-loot", "status": "unsupported", "weight": 3}
+        {"id": "callback-call-budget", "status": "supported", "weight": 1, "evidence": "lifecycle"},
+        {"id": "custom-payloads", "status": "partial", "weight": 4},
+        {"id": "screens-gui", "status": "partial", "weight": 4},
+        {"id": "rendering", "status": "partial", "weight": 6},
+        {"id": "sounds", "status": "partial", "weight": 2},
+        {"id": "recipes-loot", "status": "partial", "weight": 3}
+      ]
+    },
+    {
+      "id": "quilt-loader",
+      "phase": 7,
+      "members": [
+        {"id": "custom-game-provider", "status": "supported", "weight": 2, "evidence": "quilt"},
+        {"id": "quilt-metadata", "status": "supported", "weight": 2, "evidence": "quilt"},
+        {"id": "morizen-entrypoint", "status": "supported", "weight": 1, "evidence": "quilt"}
+      ]
+    },
+    {
+      "id": "forge-family-loaders",
+      "phase": 7,
+      "members": [
+        {"id": "neoforge-bootstrap-events", "status": "unsupported", "weight": 5},
+        {"id": "forge-bootstrap-events", "status": "unsupported", "weight": 5}
       ]
     }
   ]

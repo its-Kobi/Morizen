@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "quilt_loader": {
+    "group": "dev.morizen",
+    "id": "morizen_quilt",
+    "version": "1.0.0",
+    "metadata": {
+      "name": "Morizen Quilt bridge test",
+      "description": "A native Quilt metadata and entrypoint proof"
+    },
+    "intermediate_mappings": "net.fabricmc:intermediary",
+    "entrypoints": {
+      "morizen": "dev.morizen.testmod.QuiltMod"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "morizen_lifecycle",
+  "version": "1.0.0",
+  "name": "Morizen lifecycle bridge test",
+  "environment": "client",
+  "entrypoints": {
+    "main": ["dev.morizen.testmod.LifecycleMod"]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.5",
+    "minecraft": "=26.3",
+    "java": ">=25"
+  }
+}

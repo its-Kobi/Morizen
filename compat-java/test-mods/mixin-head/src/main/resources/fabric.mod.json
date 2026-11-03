@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "morizen_mixin_head",
+  "version": "1.0.0",
+  "name": "Morizen transformed-shim HEAD test",
+  "environment": "client",
+  "entrypoints": {
+    "main": ["dev.morizen.testmod.MixinHeadMod"]
+  },
+  "mixins": ["morizen-mixin-head.mixins.json"],
+  "depends": {
+    "fabricloader": ">=0.19.5",
+    "minecraft": "=26.3",
+    "java": ">=25"
+  }
+}

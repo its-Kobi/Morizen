@@ -28,6 +28,7 @@ OUT = ROOT / ".local" / "java-mod-bridge"
 BUILD = OUT / "build"
 JAVA_MAJOR = 25
 LOADER_VERSION = "0.19.5"
+QUILT_LOCK = JAVA_ROOT / "quilt.lock.json"
 
 
 def java_major(version):
@@ -162,9 +163,51 @@ def pinned_fabric_libraries():
     return libraries, loader[0]
 
 
-def build(jdk_home=None):
+def pinned_quilt_libraries():
+    lock = json.loads(QUILT_LOCK.read_text(encoding="utf-8"))
+    paths = []
+    for entry in lock["libraries"]:
+        path = runtime.fetch(
+            entry["url"],
+            ROOT / ".local" / "runtime" / "quilt" / entry["name"],
+            entry["sha256"],
+            "sha256",
+        )
+        if path.stat().st_size != entry["size"]:
+            raise RuntimeError(f"Quilt runtime library has the wrong size: {path}")
+        paths.append(path)
+    return lock["loader"], paths
+
+
+def game_runtime_libraries(minecraft_jar):
+    """Official third-party artifacts beside the user's jar, never the game jar itself."""
+    minecraft_jar = Path(minecraft_jar).resolve()
+    manifest = minecraft_jar.with_suffix(".json")
+    if not manifest.is_file():
+        return []
+    root = minecraft_jar.parents[2]
+    libraries = []
+    for entry in json.loads(manifest.read_text(encoding="utf-8")).get("libraries", []):
+        artifact = entry.get("downloads", {}).get("artifact", {})
+        relative = artifact.get("path")
+        if not relative:
+            continue
+        path = root / "libraries" / relative
+        if path.is_file():
+            libraries.append(path.resolve())
+    return libraries
+
+
+def build(jdk_home=None, minecraft_jar=None):
     jdk = discover_jdk_home(jdk_home)
     libraries, loader = pinned_fabric_libraries()
+    quilt, quilt_own_libraries = pinned_quilt_libraries()
+    quilt_loader = quilt_own_libraries[0]
+    quilt_libraries = [
+        *quilt_own_libraries,
+        *(path for path in libraries if "fabric-loader" not in path.name),
+    ]
+    game_libraries = game_runtime_libraries(minecraft_jar)
     if BUILD.exists():
         shutil.rmtree(BUILD)
     BUILD.mkdir(parents=True)
@@ -175,11 +218,54 @@ def build(jdk_home=None):
         path for path in main.rglob("*.java")
         if "provider" not in path.relative_to(main).parts
     ]
+    # The registry package and its exception import Minecraft types, so they
+    # compile in the same javac run as the generated shims.
+    registry_sources = [
+        path for path in bootstrap_sources
+        if "registry" in path.relative_to(main).parts
+        or path.name == "UnsupportedCompatException.java"
+    ]
     provider_classes = BUILD / "provider-classes"
+    quilt_provider_classes = BUILD / "quilt-provider-classes"
     bootstrap_classes = BUILD / "bootstrap-classes"
+    quilt_bootstrap_classes = BUILD / "quilt-bootstrap-classes"
     compile_java(jdk, provider_sources, provider_classes, libraries)
     copy_resources(JAVA_ROOT / "src" / "main" / "resources", provider_classes)
-    compile_java(jdk, bootstrap_sources, bootstrap_classes, libraries)
+    quilt_root = JAVA_ROOT / "src" / "quilt"
+    compile_java(
+        jdk,
+        (quilt_root / "java" / "dev" / "morizen" / "compat" / "quilt" / "provider").rglob("*.java"),
+        quilt_provider_classes,
+        quilt_libraries,
+    )
+    copy_resources(quilt_root / "resources", quilt_provider_classes)
+
+    # The generated shims are signatures validated against the user's own jar.
+    # They are loaded by Knot beside the bootstrapped bridge.
+    try:
+        from . import gen_compat
+    except ImportError:
+        import gen_compat
+    shims = gen_compat.build(
+        minecraft_jar,
+        jdk,
+        gen_compat.GENERATED,
+        extra_sources=registry_sources,
+    )
+    shim_classes = shims["classes"]
+    shim_jar = shims["shim_jar"]
+
+    compile_java(jdk, bootstrap_sources, bootstrap_classes, [shim_classes, *libraries])
+    compile_java(
+        jdk,
+        [
+            path
+            for path in (quilt_root / "java").rglob("*.java")
+            if "provider" not in path.relative_to(quilt_root / "java").parts
+        ],
+        quilt_bootstrap_classes,
+        [bootstrap_classes, shim_classes, *quilt_libraries],
+    )
 
     contract_classes = BUILD / "contract-classes"
     compile_java(
@@ -190,10 +276,25 @@ def build(jdk_home=None):
     )
 
     test_mod_jars = {}
-    for name in ("empty", "failing"):
+    for name in (
+        "empty",
+        "failing",
+        "registry",
+        "lifecycle",
+        "lifecycle-failing",
+        "mixin-head",
+        "quilt",
+    ):
         source = JAVA_ROOT / "test-mods" / name / "src" / "main"
         classes = BUILD / f"{name}-mod-classes"
-        compile_java(jdk, (source / "java").rglob("*.java"), classes, libraries)
+        classpath = [*libraries]
+        if name in {"registry", "mixin-head"}:
+            classpath = [shim_classes, *classpath]
+        elif name.startswith("lifecycle"):
+            classpath = [bootstrap_classes, *classpath]
+        elif name == "quilt":
+            classpath = [bootstrap_classes, *quilt_libraries]
+        compile_java(jdk, (source / "java").rglob("*.java"), classes, classpath)
         copy_resources(source / "resources", classes)
         jar = BUILD / f"morizen-{name}-test-mod.jar"
         zip_tree(jar, [classes])
@@ -201,10 +302,10 @@ def build(jdk_home=None):
 
     provider_jar = BUILD / "morizen-provider.jar"
     bootstrap_jar = BUILD / "morizen-bootstrap.jar"
-    zip_tree(provider_jar, [provider_classes])
-    zip_tree(bootstrap_jar, [bootstrap_classes])
+    zip_tree(provider_jar, [provider_classes, quilt_provider_classes])
+    zip_tree(bootstrap_jar, [bootstrap_classes, quilt_bootstrap_classes])
 
-    def write_config(name, mod_id, mod_jar):
+    def write_config(name, entries, *, loader_id="fabric", loader_version=LOADER_VERSION):
         run_root = OUT / "test-runs" / name
         if run_root.exists():
             shutil.rmtree(run_root)
@@ -214,39 +315,73 @@ def build(jdk_home=None):
             "jdk_home": str(jdk),
             "provider_jar": str(provider_jar.resolve()),
             "bootstrap_jar": str(bootstrap_jar.resolve()),
-            "fabric_libraries": [str(path.resolve()) for path in libraries],
+            "shims_jar": str(Path(shim_jar).resolve()),
+            "fabric_libraries": [
+                str(path.resolve())
+                for path in (
+                    quilt_libraries
+                    if loader_id == "quilt"
+                    else libraries
+                )
+            ],
             "game_libraries": [],
-            "mod_jars": [str(mod_jar.resolve())],
-            "mods": [{
-                "id": mod_id,
-                "version": "1.0.0",
-                "verified_compatible": name == "empty",
-            }],
+            "mod_jars": [str(test_mod_jars[entry[0]].resolve()) for entry in entries],
+            "mods": [
+                {
+                    "id": entry[1],
+                    "version": "1.0.0",
+                    "verified_compatible": entry[2],
+                }
+                for entry in entries
+            ],
             "game_dir": str(game.resolve()),
             "marker_path": str((run_root / "entrypoints.txt").resolve()),
             "report_path": str((game / "java-mods" / "compat-report.json").resolve()),
             "minecraft_version": "26.3",
-            "loader_version": LOADER_VERSION,
+            "loader_id": loader_id,
+            "loader_version": loader_version,
             "max_heap_mb": 256,
             "startup_timeout_ms": 60_000,
             "shutdown_timeout_ms": 5_000,
+            "event_timeout_ms": 2_000,
         }
         config_path = run_root / "run-config.json"
         config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
         return {"root": run_root, "values": config, "path": config_path}
 
     configs = {
-        "empty": write_config("empty", "morizen_empty", test_mod_jars["empty"]),
-        "failing": write_config("failing", "morizen_failing", test_mod_jars["failing"]),
+        "empty": write_config("empty", [("empty", "morizen_empty", True)]),
+        "failing": write_config("failing", [("failing", "morizen_failing", False)]),
+        "registry": write_config("registry", [("registry", "morizen_registry", True)]),
+        "lifecycle": write_config(
+            "lifecycle",
+            [
+                ("lifecycle", "morizen_lifecycle", True),
+                ("lifecycle-failing", "morizen_lifecycle_failing", False),
+            ],
+        ),
+        "mixin-head": write_config(
+            "mixin-head", [("mixin-head", "morizen_mixin_head", True)]
+        ),
+        "quilt": write_config(
+            "quilt",
+            [("quilt", "morizen_quilt", True)],
+            loader_id="quilt",
+            loader_version=quilt["version"],
+        ),
     }
     return {
         "jdk": jdk,
         "libraries": libraries,
         "loader": loader,
+        "quilt_loader": quilt_loader,
+        "game_libraries": game_libraries,
         "provider_jar": provider_jar,
         "bootstrap_jar": bootstrap_jar,
         "provider_classes": provider_classes,
         "contract_classes": contract_classes,
+        "shims": shims,
+        "shim_jar": shim_jar,
         "configs": configs,
     }
 
@@ -419,6 +554,213 @@ def first_gap(output):
     return lines[-1][:500] if lines else "no diagnostic output"
 
 
+def run_registry_mod(artifacts):
+    config = artifacts["configs"]["registry"]
+    result = run(
+        [
+            "cargo",
+            "run",
+            "-p",
+            "morizen-jvm",
+            "--example",
+            "registry_mod",
+            "--",
+            config["path"],
+        ],
+        env=cargo_environment(config["root"]),
+        capture=True,
+    )
+    output = result.stdout + "\n" + result.stderr
+    required = [
+        "morizen-java: registry block morizen_registry:ruby_block",
+        "morizen-java: registry block morizen_registry:ruby_lamp",
+        "morizen-java: registry item morizen_registry:ruby",
+        "morizen-java: registry item morizen_registry:ruby_block (block item)",
+        "morizen-java: registry entrypoints complete",
+        "morizen-java: registry transaction",
+        "morizen-java: content=",
+        "morizen-java: ready",
+    ]
+    missing = [line for line in required if line not in output]
+    if missing:
+        raise RuntimeError(f"registry demo log markers missing: {missing}")
+
+    marker = Path(config["values"]["marker_path"]).read_text(encoding="utf-8")
+    expected_marker = (
+        "block morizen_registry:ruby_block\n"
+        "block morizen_registry:ruby_lamp\n"
+        "item morizen_registry:ruby_block\n"
+        "item morizen_registry:ruby\n"
+    )
+    if marker != expected_marker:
+        raise RuntimeError(f"unexpected registry marker: {marker!r}")
+
+    game = Path(config["values"]["game_dir"])
+    transaction = json.loads(
+        (game / "java-mods" / "registry" / "morizen_registry.json").read_text(encoding="utf-8")
+    )
+    if transaction["schema"] != 1 or transaction["namespace"] != "morizen_registry":
+        raise RuntimeError(f"unexpected registry transaction header: {transaction}")
+    blocks = {block["id"]: block for block in transaction["blocks"]}
+    items = {item["id"]: item for item in transaction["items"]}
+    if set(blocks) != {"morizen_registry:ruby_block", "morizen_registry:ruby_lamp"}:
+        raise RuntimeError(f"unexpected blocks: {blocks}")
+    if set(items) != {"morizen_registry:ruby"}:
+        raise RuntimeError(f"unexpected items: {items}")
+    ruby = blocks["morizen_registry:ruby_block"]
+    if ruby["template"] != "minecraft:stone" or ruby["light"] != 3 or not ruby["item"]:
+        raise RuntimeError(f"ruby_block declaration lost properties: {ruby}")
+    lamp = blocks["morizen_registry:ruby_lamp"]
+    if lamp["template"] != "minecraft:glowstone" or lamp["light"] != 15:
+        raise RuntimeError(f"ruby_lamp declaration lost properties: {lamp}")
+    if items["morizen_registry:ruby"]["max_stack_size"] != 16:
+        raise RuntimeError(f"ruby item lost its stack size: {items['morizen_registry:ruby']}")
+
+    content = game / "java-mods" / "content" / "morizen_registry"
+    manifest = (content / "horizon-mod.toml").read_text(encoding="utf-8")
+    if 'id = "morizen_registry"' not in manifest or 'api = "0.2"' not in manifest:
+        raise RuntimeError(f"unexpected content manifest: {manifest!r}")
+    declaration = json.loads(
+        (
+            content
+            / "data"
+            / "morizen_registry"
+            / "horizon"
+            / "block"
+            / "ruby_block.json"
+        ).read_text(encoding="utf-8")
+    )
+    if declaration["template"] != "minecraft:stone" or declaration["item"] is not True:
+        raise RuntimeError(f"unexpected block declaration: {declaration}")
+    texture = content / "assets" / "morizen_registry" / "textures" / "block" / "ruby_block.png"
+    if texture.read_bytes()[:8] != b"\x89PNG\r\n\x1a\n":
+        raise RuntimeError(f"generated texture is not a PNG: {texture}")
+    report = json.loads(Path(config["values"]["report_path"]).read_text(encoding="utf-8"))
+    if report["mods"][0]["status"] != "works":
+        raise RuntimeError(f"registry mod was not reported as working: {report}")
+    print("morizen-java: Phase 2 registry transaction and content package passed")
+
+
+def run_lifecycle_mod(artifacts):
+    config = artifacts["configs"]["lifecycle"]
+    result = run(
+        [
+            "cargo",
+            "run",
+            "-p",
+            "morizen-jvm",
+            "--example",
+            "lifecycle_mod",
+            "--",
+            config["path"],
+        ],
+        env=cargo_environment(config["root"]),
+        capture=True,
+    )
+    output = result.stdout + "\n" + result.stderr
+    required = [
+        "morizen-java: event-batch events=1 actions=0",
+        "morizen-java: event-batch events=2 actions=1",
+        "morizen-java: event-batch events=5 actions=5",
+        "morizen-java: event-batch events=256 actions=0",
+        "morizen-java: disabled callbacks for morizen_lifecycle_failing",
+        "morizen-java: Phase 3 lifecycle/event batch passed",
+        "morizen-java: Phase 4 world snapshot and stale handles passed",
+        "morizen-java: Phase 5 network/UI/sound/data call budget passed",
+    ]
+    missing = [line for line in required if line not in output]
+    if missing:
+        raise RuntimeError(f"lifecycle demo log markers missing: {missing}")
+    marker = Path(config["values"]["marker_path"]).read_text(encoding="utf-8")
+    expected = (
+        "ok 0 start Java mods\n"
+        "fail 0 start\n"
+        "ok 1 client_tick Java mods\n"
+        "fail 1 client_tick\n"
+        "ok 2 server_tick Java mods\n"
+        "fail 2 server_tick\n"
+        "ok 3 player_join Java mods\n"
+        "fail 3 player_join\n"
+        "ok 4 block_interact Java mods\n"
+        "ok 5 command Java mods\n"
+        "ok 6 player_leave Java mods\n"
+        "ok 7 world_snapshot Java mods\n"
+        "ok 8 network_payload Java mods\n"
+        "ok 9 screen Java mods\n"
+        "ok 10 sound Java mods\n"
+        "ok 11 recipe Java mods\n"
+        "ok 12 loot Java mods\n"
+        "ok 269 stop Java mods\n"
+    )
+    if marker != expected:
+        raise RuntimeError(f"unexpected lifecycle order/isolation marker: {marker!r}")
+    print("morizen-java: Phase 3 lifecycle ordering and isolation passed")
+
+
+def run_mixin_head_mod(artifacts):
+    config = artifacts["configs"]["mixin-head"]
+    result = run(
+        [
+            "cargo",
+            "run",
+            "-p",
+            "morizen-jvm",
+            "--example",
+            "empty_fabric",
+            "--",
+            config["path"],
+        ],
+        env=cargo_environment(config["root"]),
+        capture=True,
+    )
+    output = result.stdout + "\n" + result.stderr
+    for marker in [
+        "morizen-java: mixin-head head",
+        "morizen-java: mixin-head main",
+        "morizen-java: shutdown end",
+    ]:
+        if marker not in output:
+            raise RuntimeError(f"transformed-shim marker missing: {marker}")
+    written = Path(config["values"]["marker_path"]).read_text(encoding="utf-8")
+    if written != "head\nmain\n":
+        raise RuntimeError(f"unexpected transformed-shim marker: {written!r}")
+    print("morizen-java: Phase 6 transformed-shim HEAD callback passed")
+
+
+def run_quilt_mod(artifacts):
+    config = artifacts["configs"]["quilt"]
+    result = run(
+        [
+            "cargo",
+            "run",
+            "-p",
+            "morizen-jvm",
+            "--example",
+            "empty_fabric",
+            "--",
+            config["path"],
+        ],
+        env=cargo_environment(config["root"]),
+        capture=True,
+    )
+    output = result.stdout + "\n" + result.stderr
+    for marker in [
+        "morizen-java: quilt-loader=0.30.2",
+        "morizen-java: quilt-mod=morizen_quilt@1.0.0",
+        "morizen-java: quilt entrypoint=morizen thread=Java mods",
+        "morizen-java: quilt bootstrap stop",
+    ]:
+        if marker not in output:
+            raise RuntimeError(f"Quilt provider/entrypoint marker missing: {marker}")
+    written = Path(config["values"]["marker_path"]).read_text(encoding="utf-8")
+    if written != "quilt\n":
+        raise RuntimeError(f"unexpected Quilt marker: {written!r}")
+    report = json.loads(Path(config["values"]["report_path"]).read_text(encoding="utf-8"))
+    if report["loader"] != {"id": "quilt", "version": "0.30.2"}:
+        raise RuntimeError(f"unexpected Quilt compatibility report: {report}")
+    print("morizen-java: Phase 7 embedded Quilt provider/entrypoint passed")
+
+
 def run_real_mods(artifacts):
     real_mods = pinned_real_mods()
     fabric_api = real_mods["fabric-api"]["path"]
@@ -440,8 +782,9 @@ def run_real_mods(artifacts):
             "jdk_home": str(artifacts["jdk"]),
             "provider_jar": str(artifacts["provider_jar"].resolve()),
             "bootstrap_jar": str(artifacts["bootstrap_jar"].resolve()),
+            "shims_jar": str(Path(artifacts["shim_jar"]).resolve()),
             "fabric_libraries": [str(path.resolve()) for path in artifacts["libraries"]],
-            "game_libraries": [],
+            "game_libraries": [str(path) for path in artifacts["game_libraries"]],
             "mod_jars": [str(path.resolve()) for path in mod_jars],
             "mods": [{"id": slug, "version": project["version"]}],
             "game_dir": str(game.resolve()),
@@ -449,9 +792,11 @@ def run_real_mods(artifacts):
             "report_path": str((game / "java-mods" / "compat-report.json").resolve()),
             "minecraft_version": "26.3",
             "loader_version": LOADER_VERSION,
+            "loader_id": "fabric",
             "max_heap_mb": 256,
             "startup_timeout_ms": 60_000,
             "shutdown_timeout_ms": 5_000,
+            "event_timeout_ms": 2_000,
         }
         config_path = trial / "run-config.json"
         config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
@@ -499,23 +844,53 @@ def run_real_mods(artifacts):
     return results
 
 
+def default_minecraft_jar():
+    explicit = os.environ.get("MORIZEN_MINECRAFT_JAR")
+    if explicit:
+        return Path(explicit)
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        candidate = (
+            Path(appdata)
+            / "horizon-launcher"
+            / "linked-minecraft"
+            / "versions"
+            / "26.3"
+            / "26.3.jar"
+        )
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--jdk-home", type=Path)
+    parser.add_argument("--minecraft-jar", type=Path)
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("prepare", help="compile local provider/bootstrap/test-mod jars")
     subparsers.add_parser("contract", help="build and reflect-check Fabric's provider interface")
-    subparsers.add_parser("test", help="run the provider contract and embedded-JVM empty mod")
+    subparsers.add_parser("test", help="run the provider contract, embedded-JVM and registry mods")
     subparsers.add_parser("real-mods", help="try the five hash-pinned 26.3 Fabric artifacts")
     args = parser.parse_args()
 
     try:
-        artifacts = build(args.jdk_home)
+        minecraft_jar = args.minecraft_jar or default_minecraft_jar()
+        if minecraft_jar is None:
+            raise RuntimeError(
+                "pass --minecraft-jar (or MORIZEN_MINECRAFT_JAR): the user's 26.3 client jar "
+                "is needed to generate the signature shims"
+            )
+        artifacts = build(args.jdk_home, minecraft_jar)
         if args.command in {"contract", "test"}:
             run_contract(artifacts)
         if args.command == "test":
             run_empty_mod(artifacts)
             run_failing_mod(artifacts)
+            run_registry_mod(artifacts)
+            run_lifecycle_mod(artifacts)
+            run_mixin_head_mod(artifacts)
+            run_quilt_mod(artifacts)
         if args.command == "real-mods":
             run_contract(artifacts)
             run_real_mods(artifacts)

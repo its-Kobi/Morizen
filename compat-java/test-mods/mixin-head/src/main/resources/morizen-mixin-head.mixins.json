@@ -1,0 +1,10 @@
+{
+  "required": true,
+  "minVersion": "0.8.7",
+  "package": "dev.morizen.testmod.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": ["BlockMixin"],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

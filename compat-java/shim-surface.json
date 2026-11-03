@@ -1,0 +1,182 @@
+{
+  "schema": 1,
+  "minecraft": "26.3",
+  "note": "The classes and members the bridge re-implements for 26.3. Every entry without \"extra\": true is checked against the user's own client jar before any source is generated; members the jar does not have abort generation. Bodies live in tools/gen_compat.py.",
+  "classes": [
+    {
+      "name": "net.minecraft.resources.Identifier",
+      "kind": "class",
+      "access": "public final",
+      "typeParameters": [],
+      "implements": ["java.lang.Comparable<net.minecraft.resources.Identifier>"],
+      "members": [
+        {"kind": "field", "name": "namespace", "descriptor": "Ljava/lang/String;", "access": "private final"},
+        {"kind": "field", "name": "path", "descriptor": "Ljava/lang/String;", "access": "private final"},
+        {"kind": "constructor", "descriptor": "(Ljava/lang/String;Ljava/lang/String;)V", "access": "private"},
+        {"kind": "method", "name": "fromNamespaceAndPath", "descriptor": "(Ljava/lang/String;Ljava/lang/String;)Lnet/minecraft/resources/Identifier;", "access": "public static"},
+        {"kind": "method", "name": "parse", "descriptor": "(Ljava/lang/String;)Lnet/minecraft/resources/Identifier;", "access": "public static"},
+        {"kind": "method", "name": "tryParse", "descriptor": "(Ljava/lang/String;)Lnet/minecraft/resources/Identifier;", "access": "public static"},
+        {"kind": "method", "name": "getNamespace", "descriptor": "()Ljava/lang/String;", "access": "public"},
+        {"kind": "method", "name": "getPath", "descriptor": "()Ljava/lang/String;", "access": "public"},
+        {"kind": "method", "name": "withPrefix", "descriptor": "(Ljava/lang/String;)Lnet/minecraft/resources/Identifier;", "access": "public"},
+        {"kind": "method", "name": "withSuffix", "descriptor": "(Ljava/lang/String;)Lnet/minecraft/resources/Identifier;", "access": "public"},
+        {"kind": "method", "name": "toString", "descriptor": "()Ljava/lang/String;", "access": "public"},
+        {"kind": "method", "name": "equals", "descriptor": "(Ljava/lang/Object;)Z", "access": "public"},
+        {"kind": "method", "name": "hashCode", "descriptor": "()I", "access": "public"},
+        {"kind": "method", "name": "compareTo", "descriptor": "(Lnet/minecraft/resources/Identifier;)I", "access": "public"}
+      ]
+    },
+    {
+      "name": "net.minecraft.core.Registry",
+      "kind": "interface",
+      "access": "public",
+      "typeParameters": ["T"],
+      "members": [
+        {"kind": "method", "name": "getKey", "descriptor": "(Ljava/lang/Object;)Lnet/minecraft/resources/Identifier;", "access": "public abstract", "signature": "public abstract net.minecraft.resources.Identifier getKey(T value)"},
+        {"kind": "method", "name": "getValue", "descriptor": "(Lnet/minecraft/resources/Identifier;)Ljava/lang/Object;", "access": "public abstract", "signature": "public abstract T getValue(net.minecraft.resources.Identifier id)"},
+        {"kind": "method", "name": "getId", "descriptor": "(Ljava/lang/Object;)I", "access": "public abstract", "signature": "public abstract int getId(T value)"},
+        {"kind": "method", "name": "containsKey", "descriptor": "(Lnet/minecraft/resources/Identifier;)Z", "access": "public abstract", "signature": "public abstract boolean containsKey(net.minecraft.resources.Identifier id)"},
+        {"kind": "method", "name": "keySet", "descriptor": "()Ljava/util/Set;", "access": "public abstract", "signature": "public abstract java.util.Set<net.minecraft.resources.Identifier> keySet()"},
+        {"kind": "method", "name": "register", "descriptor": "(Lnet/minecraft/core/Registry;Ljava/lang/String;Ljava/lang/Object;)Ljava/lang/Object;", "access": "public static", "signature": "public static <T> T register(net.minecraft.core.Registry<? super T> registry, java.lang.String name, T entry)"},
+        {"kind": "method", "name": "register", "descriptor": "(Lnet/minecraft/core/Registry;Lnet/minecraft/resources/Identifier;Ljava/lang/Object;)Ljava/lang/Object;", "access": "public static", "signature": "public static <V, T extends V> T register(net.minecraft.core.Registry<V> registry, net.minecraft.resources.Identifier id, T entry)"}
+      ]
+    },
+    {
+      "name": "net.minecraft.core.DefaultedRegistry",
+      "kind": "interface",
+      "access": "public",
+      "typeParameters": ["T"],
+      "extends": ["net.minecraft.core.Registry<T>"],
+      "members": [
+        {"kind": "method", "name": "getDefaultKey", "descriptor": "()Lnet/minecraft/resources/Identifier;", "access": "public abstract"}
+      ]
+    },
+    {
+      "name": "net.minecraft.core.registries.BuiltInRegistries",
+      "kind": "class",
+      "access": "public",
+      "typeParameters": [],
+      "members": [
+        {"kind": "field", "name": "BLOCK", "descriptor": "Lnet/minecraft/core/DefaultedRegistry;", "access": "public static final", "signature": "public static final net.minecraft.core.DefaultedRegistry<net.minecraft.world.level.block.Block> BLOCK", "init": "dev.morizen.compat.registry.MorizenRegistries.BLOCK"},
+        {"kind": "field", "name": "ITEM", "descriptor": "Lnet/minecraft/core/DefaultedRegistry;", "access": "public static final", "signature": "public static final net.minecraft.core.DefaultedRegistry<net.minecraft.world.item.Item> ITEM", "init": "dev.morizen.compat.registry.MorizenRegistries.ITEM"}
+      ]
+    },
+    {
+      "name": "net.minecraft.world.level.ItemLike",
+      "kind": "interface",
+      "access": "public",
+      "typeParameters": [],
+      "members": [
+        {"kind": "method", "name": "asItem", "descriptor": "()Lnet/minecraft/world/item/Item;", "access": "public abstract"}
+      ]
+    },
+    {
+      "name": "net.minecraft.world.level.block.state.BlockBehaviour",
+      "kind": "class",
+      "access": "public",
+      "typeParameters": [],
+      "members": [
+        {"kind": "field", "name": "properties", "descriptor": "Lnet/minecraft/world/level/block/state/BlockBehaviour$Properties;", "access": "protected final"},
+        {"kind": "constructor", "descriptor": "(Lnet/minecraft/world/level/block/state/BlockBehaviour$Properties;)V", "access": "public"},
+        {"kind": "method", "name": "properties", "descriptor": "()Lnet/minecraft/world/level/block/state/BlockBehaviour$Properties;", "access": "public"}
+      ]
+    },
+    {
+      "name": "net.minecraft.world.level.block.state.BlockBehaviour$Properties",
+      "outer": "net.minecraft.world.level.block.state.BlockBehaviour",
+      "kind": "class",
+      "access": "public static",
+      "typeParameters": [],
+      "members": [
+        {"kind": "field", "name": "template", "descriptor": "Ljava/lang/String;", "access": "private", "extra": true, "init": "\"minecraft:stone\""},
+        {"kind": "field", "name": "hasCollision", "descriptor": "Z", "access": "private", "init": "true"},
+        {"kind": "field", "name": "lightEmission", "descriptor": "Ljava/util/function/ToIntFunction;", "access": "private"},
+        {"kind": "field", "name": "friction", "descriptor": "F", "access": "private", "init": "0.6F"},
+        {"kind": "field", "name": "destroyTime", "descriptor": "F", "access": "private"},
+        {"kind": "field", "name": "explosionResistance", "descriptor": "F", "access": "private"},
+        {"kind": "field", "name": "requiresCorrectToolForDrops", "descriptor": "Z", "access": "private", "init": "false"},
+        {"kind": "constructor", "descriptor": "()V", "access": "private", "extra": true},
+        {"kind": "method", "name": "of", "descriptor": "()Lnet/minecraft/world/level/block/state/BlockBehaviour$Properties;", "access": "public static"},
+        {"kind": "method", "name": "strength", "descriptor": "(F)Lnet/minecraft/world/level/block/state/BlockBehaviour$Properties;", "access": "public"},
+        {"kind": "method", "name": "strength", "descriptor": "(FF)Lnet/minecraft/world/level/block/state/BlockBehaviour$Properties;", "access": "public"},
+        {"kind": "method", "name": "lightLevel", "descriptor": "(Ljava/util/function/ToIntFunction;)Lnet/minecraft/world/level/block/state/BlockBehaviour$Properties;", "access": "public"},
+        {"kind": "method", "name": "requiresCorrectToolForDrops", "descriptor": "()Lnet/minecraft/world/level/block/state/BlockBehaviour$Properties;", "access": "public"},
+        {"kind": "method", "name": "friction", "descriptor": "(F)Lnet/minecraft/world/level/block/state/BlockBehaviour$Properties;", "access": "public"},
+        {"kind": "method", "name": "noCollision", "descriptor": "()Lnet/minecraft/world/level/block/state/BlockBehaviour$Properties;", "access": "public"},
+        {"kind": "method", "name": "morizenTemplate", "descriptor": "(Ljava/lang/String;)Lnet/minecraft/world/level/block/state/BlockBehaviour$Properties;", "access": "public", "extra": true},
+        {"kind": "method", "name": "morizenStrength", "descriptor": "()F", "access": "public", "extra": true},
+        {"kind": "method", "name": "morizenLight", "descriptor": "()I", "access": "public", "extra": true},
+        {"kind": "method", "name": "morizenFriction", "descriptor": "()F", "access": "public", "extra": true},
+        {"kind": "method", "name": "morizenRequiresTool", "descriptor": "()Z", "access": "public", "extra": true},
+        {"kind": "method", "name": "morizenHasCollision", "descriptor": "()Z", "access": "public", "extra": true},
+        {"kind": "method", "name": "morizenTemplateName", "descriptor": "()Ljava/lang/String;", "access": "public", "extra": true}
+      ]
+    },
+    {
+      "name": "net.minecraft.world.level.block.Block",
+      "kind": "class",
+      "access": "public",
+      "typeParameters": [],
+      "extends": "net.minecraft.world.level.block.state.BlockBehaviour",
+      "implements": ["net.minecraft.world.level.ItemLike"],
+      "members": [
+        {"kind": "constructor", "descriptor": "(Lnet/minecraft/world/level/block/state/BlockBehaviour$Properties;)V", "access": "public"},
+        {"kind": "method", "name": "asItem", "descriptor": "()Lnet/minecraft/world/item/Item;", "access": "public"},
+        {"kind": "method", "name": "defaultBlockState", "descriptor": "()Lnet/minecraft/world/level/block/state/BlockState;", "access": "public final"}
+      ]
+    },
+    {
+      "name": "net.minecraft.world.level.block.state.BlockState",
+      "kind": "class",
+      "access": "public",
+      "typeParameters": [],
+      "members": [
+        {"kind": "field", "name": "block", "descriptor": "Lnet/minecraft/world/level/block/Block;", "access": "private final", "extra": true},
+        {"kind": "constructor", "descriptor": "(Lnet/minecraft/world/level/block/Block;)V", "access": "public", "extra": true},
+        {"kind": "method", "name": "getBlock", "descriptor": "()Lnet/minecraft/world/level/block/Block;", "access": "public", "extra": true}
+      ]
+    },
+    {
+      "name": "net.minecraft.world.item.Item",
+      "kind": "class",
+      "access": "public",
+      "typeParameters": [],
+      "implements": ["net.minecraft.world.level.ItemLike"],
+      "members": [
+        {"kind": "field", "name": "BY_BLOCK", "descriptor": "Ljava/util/Map;", "access": "public static final", "signature": "public static final java.util.Map<net.minecraft.world.level.block.Block, net.minecraft.world.item.Item> BY_BLOCK", "init": "new java.util.HashMap<>()"},
+        {"kind": "field", "name": "properties", "descriptor": "Lnet/minecraft/world/item/Item$Properties;", "access": "private final", "extra": true},
+        {"kind": "constructor", "descriptor": "(Lnet/minecraft/world/item/Item$Properties;)V", "access": "public"},
+        {"kind": "method", "name": "asItem", "descriptor": "()Lnet/minecraft/world/item/Item;", "access": "public"},
+        {"kind": "method", "name": "morizenProperties", "descriptor": "()Lnet/minecraft/world/item/Item$Properties;", "access": "public", "extra": true}
+      ]
+    },
+    {
+      "name": "net.minecraft.world.item.Item$Properties",
+      "outer": "net.minecraft.world.item.Item",
+      "kind": "class",
+      "access": "public static",
+      "typeParameters": [],
+      "members": [
+        {"kind": "field", "name": "template", "descriptor": "Ljava/lang/String;", "access": "private", "extra": true, "init": "\"minecraft:paper\""},
+        {"kind": "field", "name": "maxStackSize", "descriptor": "I", "access": "private", "extra": true, "init": "64"},
+        {"kind": "constructor", "descriptor": "()V", "access": "public"},
+        {"kind": "method", "name": "stacksTo", "descriptor": "(I)Lnet/minecraft/world/item/Item$Properties;", "access": "public"},
+        {"kind": "method", "name": "morizenItemTemplate", "descriptor": "(Ljava/lang/String;)Lnet/minecraft/world/item/Item$Properties;", "access": "public", "extra": true},
+        {"kind": "method", "name": "morizenMaxStackSize", "descriptor": "()I", "access": "public", "extra": true},
+        {"kind": "method", "name": "morizenItemTemplateName", "descriptor": "()Ljava/lang/String;", "access": "public", "extra": true}
+      ]
+    },
+    {
+      "name": "net.minecraft.world.item.BlockItem",
+      "kind": "class",
+      "access": "public",
+      "typeParameters": [],
+      "extends": "net.minecraft.world.item.Item",
+      "members": [
+        {"kind": "field", "name": "block", "descriptor": "Lnet/minecraft/world/level/block/Block;", "access": "private final"},
+        {"kind": "constructor", "descriptor": "(Lnet/minecraft/world/level/block/Block;Lnet/minecraft/world/item/Item$Properties;)V", "access": "public"},
+        {"kind": "method", "name": "getBlock", "descriptor": "()Lnet/minecraft/world/level/block/Block;", "access": "public"}
+      ]
+    }
+  ]
+}

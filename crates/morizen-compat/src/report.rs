@@ -53,8 +53,9 @@ pub struct CompatReport {
 }
 
 impl CompatReport {
-    pub fn fabric(
+    pub fn loader(
         minecraft: impl Into<String>,
+        loader_id: impl Into<String>,
         loader_version: impl Into<String>,
         mods: Vec<ModReport>,
     ) -> Self {
@@ -62,11 +63,19 @@ impl CompatReport {
             schema: REPORT_SCHEMA,
             minecraft: minecraft.into(),
             loader: LoaderInfo {
-                id: "fabric".into(),
+                id: loader_id.into(),
                 version: loader_version.into(),
             },
             mods,
         }
+    }
+
+    pub fn fabric(
+        minecraft: impl Into<String>,
+        loader_version: impl Into<String>,
+        mods: Vec<ModReport>,
+    ) -> Self {
+        Self::loader(minecraft, "fabric", loader_version, mods)
     }
 
     /// Writes and syncs a complete report beside the destination, then atomically

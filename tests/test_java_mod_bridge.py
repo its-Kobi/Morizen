@@ -40,6 +40,28 @@ class JavaModBridgeToolTests(unittest.TestCase):
                 self.assertEqual(archive.namelist(), ["dev/morizen/Example.class"])
                 self.assertEqual(archive.getinfo(archive.namelist()[0]).date_time, (1980, 1, 1, 0, 0, 0))
 
+    def test_phase_two_sources_and_outputs_stay_separate(self):
+        source = java_mod_bridge.JAVA_ROOT / "test-mods" / "registry" / "src" / "main"
+        self.assertTrue((source / "resources" / "fabric.mod.json").is_file())
+        self.assertTrue((source / "java" / "dev" / "morizen" / "testmod" / "RegistryMod.java").is_file())
+        self.assertTrue(str(java_mod_bridge.BUILD).startswith(str(java_mod_bridge.ROOT / ".local")))
+
+    def test_game_runtime_libraries_never_include_the_game_jar(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            version = root / "versions" / "26.3"
+            library = root / "libraries" / "example" / "dep.jar"
+            version.mkdir(parents=True)
+            library.parent.mkdir(parents=True)
+            jar = version / "26.3.jar"
+            jar.write_bytes(b"game")
+            library.write_bytes(b"library")
+            (version / "26.3.json").write_text(
+                '{"libraries":[{"downloads":{"artifact":{"path":"example/dep.jar"}}}]}',
+                encoding="utf-8",
+            )
+            self.assertEqual(java_mod_bridge.game_runtime_libraries(jar), [library.resolve()])
+
 
 if __name__ == "__main__":
     unittest.main()

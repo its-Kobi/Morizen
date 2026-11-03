@@ -2,6 +2,7 @@ package dev.morizen.compat;
 
 import java.nio.file.Path;
 import java.util.Comparator;
+import dev.morizen.compat.events.BridgeEvents;
 import net.fabricmc.loader.api.ModContainer;
 import net.fabricmc.loader.impl.FabricLoaderImpl;
 import net.fabricmc.loader.impl.game.minecraft.Hooks;
@@ -36,7 +37,23 @@ public final class Bootstrap {
         // Fabric checks that the game instance itself came from Knot. A plain
         // java.lang.Object has the bootstrap class loader (null), so use this
         // target-loaded marker object as Morizen's logical game instance.
-        Hooks.startClient(gameDirectory.toFile(), new MorizenGameInstance());
+        Throwable failure = null;
+        try {
+            Hooks.startClient(gameDirectory.toFile(), new MorizenGameInstance());
+        } catch (Throwable error) {
+            failure = error;
+            throw error;
+        } finally {
+            try {
+                NativeBridge.commitRegistry();
+            } catch (Throwable commitError) {
+                if (failure != null) {
+                    failure.addSuppressed(commitError);
+                } else {
+                    throw commitError;
+                }
+            }
+        }
     }
 
     private static String describe(ModContainer container) {
@@ -48,6 +65,15 @@ public final class Bootstrap {
         System.out.println("morizen-java: bootstrap stop");
         targetLoader = null;
         Thread.currentThread().setContextClassLoader(ClassLoader.getSystemClassLoader());
+    }
+
+    /** One coarse event batch from the native engine. */
+    public static String dispatch(String wire) {
+        return BridgeEvents.dispatch(wire);
+    }
+
+    public static boolean hasCallbacks() {
+        return BridgeEvents.hasCallbacks();
     }
 
     private static final class MorizenGameInstance {}

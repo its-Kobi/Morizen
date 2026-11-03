@@ -14,6 +14,10 @@ fn default_loader_version() -> String {
     "0.19.5".into()
 }
 
+fn default_loader_id() -> String {
+    "fabric".into()
+}
+
 fn default_heap_mb() -> u32 {
     256
 }
@@ -24,6 +28,10 @@ fn default_startup_timeout_ms() -> u64 {
 
 fn default_shutdown_timeout_ms() -> u64 {
     5_000
+}
+
+fn default_event_timeout_ms() -> u64 {
+    250
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -49,6 +57,17 @@ pub struct LaunchConfig {
     pub mod_jars: Vec<PathBuf>,
     #[serde(default)]
     pub mods: Vec<ConfiguredMod>,
+    /// Generated signature-only shims, when the harness built them.
+    #[serde(default)]
+    pub shims_jar: Option<PathBuf>,
+    /// Where Java writes its registry transactions. Defaults to
+    /// `<game_dir>/java-mods/registry`.
+    #[serde(default)]
+    pub registry_dir: Option<PathBuf>,
+    /// Where the host writes the generated content mods. Defaults to
+    /// `<game_dir>/java-mods/content`.
+    #[serde(default)]
+    pub content_dir: Option<PathBuf>,
     pub game_dir: PathBuf,
     pub marker_path: PathBuf,
     pub report_path: PathBuf,
@@ -56,15 +75,32 @@ pub struct LaunchConfig {
     pub minecraft_version: String,
     #[serde(default = "default_loader_version")]
     pub loader_version: String,
+    #[serde(default = "default_loader_id")]
+    pub loader_id: String,
     #[serde(default = "default_heap_mb")]
     pub max_heap_mb: u32,
     #[serde(default = "default_startup_timeout_ms")]
     pub startup_timeout_ms: u64,
     #[serde(default = "default_shutdown_timeout_ms")]
     pub shutdown_timeout_ms: u64,
+    /// Maximum time a game thread waits for one bounded Java callback batch.
+    #[serde(default = "default_event_timeout_ms")]
+    pub event_timeout_ms: u64,
 }
 
 impl LaunchConfig {
+    pub fn registry_directory(&self) -> PathBuf {
+        self.registry_dir
+            .clone()
+            .unwrap_or_else(|| self.game_dir.join("java-mods").join("registry"))
+    }
+
+    pub fn content_directory(&self) -> PathBuf {
+        self.content_dir
+            .clone()
+            .unwrap_or_else(|| self.game_dir.join("java-mods").join("content"))
+    }
+
     pub fn from_path(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
         let bytes = fs::read(path).map_err(|error| {
@@ -91,10 +127,19 @@ impl LaunchConfig {
                 self.minecraft_version
             )));
         }
-        if self.loader_version != "0.19.5" {
+        let expected_loader = match self.loader_id.as_str() {
+            "fabric" => "0.19.5",
+            "quilt" => "0.30.2",
+            other => {
+                return Err(BridgeError::Config(format!(
+                    "unsupported Java mod loader {other:?}; expected fabric or quilt"
+                )));
+            }
+        };
+        if self.loader_version != expected_loader {
             return Err(BridgeError::Config(format!(
-                "expected Fabric Loader 0.19.5, got {}",
-                self.loader_version
+                "expected {} Loader {expected_loader}, got {}",
+                self.loader_id, self.loader_version
             )));
         }
         if !(32..=4096).contains(&self.max_heap_mb) {
@@ -107,6 +152,12 @@ impl LaunchConfig {
             return Err(BridgeError::Config(
                 "startup_timeout_ms and shutdown_timeout_ms must be nonzero".into(),
             ));
+        }
+        if !(1..=5_000).contains(&self.event_timeout_ms) {
+            return Err(BridgeError::Config(format!(
+                "event_timeout_ms must be between 1 and 5000, got {}",
+                self.event_timeout_ms
+            )));
         }
         require_file("provider jar", &self.provider_jar)?;
         require_file("bootstrap jar", &self.bootstrap_jar)?;
@@ -123,6 +174,9 @@ impl LaunchConfig {
         }
         for mod_jar in &self.mod_jars {
             require_file("mod jar", mod_jar)?;
+        }
+        if let Some(shims) = &self.shims_jar {
+            require_file("shim jar", shims)?;
         }
         if self.marker_path.as_os_str().is_empty() || self.report_path.as_os_str().is_empty() {
             return Err(BridgeError::Config(
@@ -160,8 +214,27 @@ mod tests {
         let config: LaunchConfig = serde_json::from_str(json).unwrap();
         assert_eq!(config.minecraft_version, "26.3");
         assert_eq!(config.loader_version, "0.19.5");
+        assert_eq!(config.loader_id, "fabric");
         assert_eq!(config.max_heap_mb, 256);
         assert_eq!(config.startup_timeout_ms, 60_000);
         assert_eq!(config.shutdown_timeout_ms, 5_000);
+        assert_eq!(config.event_timeout_ms, 250);
+    }
+
+    #[test]
+    fn quilt_loader_is_an_explicit_pinned_choice() {
+        let json = r#"{
+            "provider_jar":"missing-provider.jar",
+            "bootstrap_jar":"missing-bootstrap.jar",
+            "fabric_libraries":[],
+            "game_dir":"game",
+            "marker_path":"marker",
+            "report_path":"report",
+            "loader_id":"quilt",
+            "loader_version":"0.30.2"
+        }"#;
+        let config: LaunchConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.loader_id, "quilt");
+        assert_eq!(config.loader_version, "0.30.2");
     }
 }

@@ -8,8 +8,12 @@ under `.local/java-mod-bridge/` and are never committed.
   supplies Fabric Loader's custom `GameProvider` service.
 - The other `src/main` classes are packaged separately and loaded through Knot's transforming target
   class loader.
-- `test-mods/empty/` is the Phase 1 Fabric mod. Its `main` and `client` entrypoints write a marker
-  used by the headless bridge test.
+- `src/quilt/` contains the independently compiled Quilt 0.30.2 provider/bootstrap; its public
+  runtime dependencies and hashes are pinned in `quilt.lock.json`.
+- `test-mods/` contains purpose-built gates: empty/failing entrypoints, registry content, lifecycle
+  batches and isolation, a transformed-shim Mixin HEAD callback, and native Quilt metadata.
+- `shim-surface.json` is the reviewed 26.3 member surface. `tools/gen_compat.py` validates it against
+  the user's jar before generating anything.
 
 No `net.minecraft.*` source belongs here. Signature-only generated shims are private local output
 under `.local/java-mod-bridge/generated-src/`.

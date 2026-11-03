@@ -11,7 +11,7 @@ class CompatLedgerTests(unittest.TestCase):
         self.assertLess(result["supported_weight"], result["total_weight"])
         loader = next(area for area in result["areas"] if area["id"] == "loader")
         self.assertEqual(loader["status"], "partial")
-        self.assertEqual(loader["evidence"], ["empty"])
+        self.assertEqual(loader["evidence"], ["empty", "mixin-head"])
 
     def test_supported_member_requires_evidence(self):
         data = copy.deepcopy(compat_ledger.load())

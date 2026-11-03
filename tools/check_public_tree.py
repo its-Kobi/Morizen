@@ -12,6 +12,9 @@ ORIGINAL_JDK_TOOLS = {"tools/JfrSummary.java", "tests/java/JfrFixture.java"}
 JAVA_MOD_BRIDGE_ROOTS = (
     "compat-java/src/main/java/dev/morizen/",
     "compat-java/src/test/java/dev/morizen/",
+    # The Quilt provider is a second source set: it is compiled into the
+    # loader bootstrap JAR, not into the Fabric compatibility JAR.
+    "compat-java/src/quilt/java/dev/morizen/",
 )
 
 
