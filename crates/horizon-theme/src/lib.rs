@@ -81,6 +81,10 @@ pub mod icons {
     }
 }
 
+/// The product's name, for window titles and the version line. The code and the
+/// installed paths keep Horizon's names; this is what players read.
+pub const PRODUCT_NAME: &str = "Morizen";
+
 /// Morizen's icon at 64 px (PNG), for window title bars and task bars at run time. Rendered from
 /// `docs/media/brand/icon.svg` by `cargo run -p xtask -- icons`.
 pub const ICON_PNG: &[u8] = include_bytes!("../icons/horizon-64.png");
@@ -714,6 +718,11 @@ mod tests {
             let label = contrast(p.on_face, p.face);
             assert!(label >= 4.5, "{theme} the main action's label: {label:.2}");
         }
+    }
+
+    #[test]
+    fn the_product_name_is_morizen() {
+        assert_eq!(PRODUCT_NAME, "Morizen");
     }
 
     #[test]
