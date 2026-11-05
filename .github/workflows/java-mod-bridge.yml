@@ -154,5 +154,4 @@ jobs:
           gh release create "$TAG" \
             dist/horizon-windows-x64.zip dist/SHA256SUMS dist/SHA256SUMS.sig \
             --title "Morizen java-mods ${TAG#v}" \
-            --notes "Windows build with the opt-in Java mod bridge (docs/java-mod-bridge.md). Signed game archive for the Morizen launcher." \
-            --prerelease
+            --notes "Windows build with the opt-in Java mod bridge (docs/java-mod-bridge.md). Signed game archive for the Morizen launcher."
