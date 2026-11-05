@@ -386,6 +386,73 @@ def build(jdk_home=None, minecraft_jar=None):
     }
 
 
+def mod_metadata(path):
+    """A mod jar's id and version from its Fabric or Quilt metadata, when it has any."""
+    try:
+        with zipfile.ZipFile(path) as jar:
+            names = set(jar.namelist())
+            if "fabric.mod.json" in names:
+                data = json.loads(jar.read("fabric.mod.json"))
+                return data.get("id"), data.get("version")
+            if "quilt.mod.json" in names:
+                data = json.loads(jar.read("quilt.mod.json"))
+                loader = data.get("quilt_loader", {})
+                return loader.get("id"), loader.get("version")
+    except (OSError, ValueError, zipfile.BadZipFile):
+        pass
+    return None, None
+
+
+def write_game_config(artifacts, mods=None, out=None):
+    """Write the config the game (and the launcher) reads, pointed at `mods`.
+
+    `mods` is a folder of jars or one jar. Test mods built here keep their verified mark;
+    every other jar starts `verified_compatible: false`, as the ledger requires.
+    """
+    out = Path(out) if out else OUT / "in-game" / "config.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    base = artifacts["configs"]["empty"]["values"]
+    jars = []
+    if mods is not None:
+        mods = Path(mods)
+        jars = [mods] if mods.is_file() else sorted(mods.glob("*.jar"))
+    entries = []
+    for jar in jars:
+        mod_id, version = mod_metadata(jar)
+        mod_id = mod_id or jar.stem
+        entries.append(
+            {
+                "id": mod_id,
+                "version": str(version or "0"),
+                "verified_compatible": mod_id.startswith("morizen_"),
+            }
+        )
+    game = out.parent / "game"
+    game.mkdir(parents=True, exist_ok=True)
+    config = {
+        "jdk_home": base.get("jdk_home"),
+        "provider_jar": base["provider_jar"],
+        "bootstrap_jar": base["bootstrap_jar"],
+        "shims_jar": base.get("shims_jar"),
+        "fabric_libraries": base["fabric_libraries"],
+        "game_libraries": base.get("game_libraries", []),
+        "mod_jars": [str(jar.resolve()) for jar in jars],
+        "mods": entries,
+        "game_dir": str(game.resolve()),
+        "marker_path": str((out.parent / "entrypoints.txt").resolve()),
+        "report_path": str((out.parent / "compat-report.json").resolve()),
+        "minecraft_version": "26.3",
+        "loader_id": base.get("loader_id", "fabric"),
+        "loader_version": base.get("loader_version", LOADER_VERSION),
+        "max_heap_mb": 1024,
+        "startup_timeout_ms": 60_000,
+        "shutdown_timeout_ms": 5_000,
+        "event_timeout_ms": 2_000,
+    }
+    out.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+    return out
+
+
 def run_contract(artifacts):
     classpath = [
         artifacts["contract_classes"],
@@ -872,6 +939,11 @@ def main():
     subparsers.add_parser("contract", help="build and reflect-check Fabric's provider interface")
     subparsers.add_parser("test", help="run the provider contract, embedded-JVM and registry mods")
     subparsers.add_parser("real-mods", help="try the five hash-pinned 26.3 Fabric artifacts")
+    game = subparsers.add_parser(
+        "game-config", help="write the config the native game and the launcher read"
+    )
+    game.add_argument("--mods", type=Path, help="a folder of mod jars, or one jar")
+    game.add_argument("--out", type=Path, help="where to write it")
     args = parser.parse_args()
 
     try:
@@ -896,6 +968,8 @@ def main():
             run_real_mods(artifacts)
         if args.command == "prepare":
             print(artifacts["configs"]["empty"]["path"])
+        if args.command == "game-config":
+            print(write_game_config(artifacts, args.mods, args.out))
     except (OSError, RuntimeError, subprocess.SubprocessError) as error:
         print(f"java_mod_bridge: {error}", file=sys.stderr)
         return 1

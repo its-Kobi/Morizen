@@ -597,6 +597,13 @@ pub fn play_time(played: Duration) -> String {
 /// launcher has them, and options.txt and the offline name when it has none yet.
 pub fn apply(cmd: &mut Command, instance: &Instance) -> Result<(), String> {
     instance.horizon()?;
+    // The opt-in Java bridge, per instance: its own `java-mods/config.json`, or the player's.
+    #[cfg(feature = "java-mods")]
+    let _ = crate::java_bridge::apply(
+        cmd,
+        &instance.home,
+        backend::Settings::load().java_mods_config.as_deref(),
+    );
     match instance.kind {
         Kind::Default => return Ok(()),
         Kind::Own => {

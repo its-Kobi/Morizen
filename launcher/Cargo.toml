@@ -5,6 +5,13 @@ edition = "2021"
 license = "MIT"
 description = "Downloads, prepares and starts Horizon builds"
 
+[features]
+default = []
+# The experimental embedded Java bridge (`docs/java-mod-bridge.md`): Settings gains the
+# bridge config row and Play passes it to a game built with the game's own `java-mods`
+# feature. Off in released launchers.
+java-mods = []
+
 [workspace]
 
 [dependencies]

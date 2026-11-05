@@ -1,17 +1,21 @@
 name: java mod bridge
-# Builds the opt-in Java bridge on its branch, so a Windows binary can be downloaded
-# from the run instead of built locally. Not a release and not a main check: the
-# feature stays off in every other build (`docs/java-mod-bridge.md`).
+# Builds the opt-in Java bridge, the full Windows Morizen (launcher + game) and a test kit, so
+# the feature can be tried from a downloaded launcher instead of a local build. The feature stays
+# off in every ordinary build (`docs/java-mod-bridge.md`).
 on:
   push:
-    branches: [feature/java-mod-bridge]
+    branches: [main, feature/java-mod-bridge]
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   windows:
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
+    env:
+      # The launcher's ci.yml build links the C runtime in, so the downloaded programme
+      # runs without the Visual C++ redistributable; the game gets the same treatment.
+      RUSTFLAGS: -C target-feature=+crt-static
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -20,18 +24,88 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: java-mod-bridge-windows
+          workspaces: |
+            .
+            launcher
       - name: Check formatting
+        run: cargo fmt --check
+      - name: Check the launcher's formatting
+        working-directory: launcher
         run: cargo fmt --check
       - name: Test the bridge's Rust side
         run: cargo test --locked -p morizen-compat
+      - name: Test the launcher's bridge wiring
+        working-directory: launcher
+        run: cargo test --locked --features java-mods --lib
+      - name: Test the launcher setup tool
+        run: python -m unittest discover -s tests -p "test_java_mods_launcher.py"
       - name: Build the game with the Java bridge
         run: cargo build --profile fast --locked -p horizon-client --bin horizon-client --bin horizon-ctl --features java-mods
+      - name: Build the launcher with the bridge row
+        working-directory: launcher
+        run: cargo build --release --locked --features java-mods
+      # A self-contained kit: the launcher, the bridge's game, and the original (never Mojang)
+      # sources and generator the player runs against their own 26.3 jar and JDK. Generated
+      # shims and bridge jars stay in the player's .local and never reach the artifact.
+      - name: Package the test kit
+        shell: pwsh
+        run: |
+          $dist = "dist/morizen-windows-x64-java-mods"
+          New-Item -ItemType Directory -Force -Path "$dist/tools", "$dist/tools/benchmark-deps" | Out-Null
+          Copy-Item target/fast/horizon-client.exe, target/fast/horizon-ctl.exe $dist
+          Copy-Item launcher/target/release/horizon-launcher.exe $dist
+          Copy-Item tools/lab.py, tools/runtime.py, tools/gen_compat.py, tools/compat_ledger.py, tools/java_mod_bridge.py $dist/tools
+          Copy-Item tools/benchmark-deps/* $dist/tools/benchmark-deps
+          Copy-Item compat-java $dist/compat-java -Recurse
+          Copy-Item tools/java_mods_launcher.py $dist/setup.py
+          Copy-Item docs/java-mod-bridge.md "$dist/JAVA-MODS.md"
+          @'
+          Morizen: Windows build with the Java mod bridge
+          ===============================================
+
+          This is an experimental build of the full Morizen (launcher and game), not a release.
+          It runs real Fabric and Quilt mods in an embedded JVM inside the native Rust game
+          (JAVA-MODS.md). Forge and NeoForge are not supported for 26.3. The bridge is off in
+          ordinary builds.
+
+          What is here
+            horizon-launcher.exe   the experimental launcher (Settings > Game > Java mods config)
+            horizon-client.exe     the game built with the java-mods feature
+            horizon-ctl.exe        the game's command line/agent control tool
+            setup.py               points the launcher at this build and your bridge config
+            tools/                 the original bridge generators (Python, no Mojang files)
+            compat-java/           the original provider, bootstrap and test-mod sources
+
+          Once, on this computer
+            1. Install Java 25 (a JDK) and have your own Minecraft 26.3 client jar.
+            2. Build the bridge from your own jar and write its config (Java only, not Rust):
+                 py -3 tools\java_mod_bridge.py game-config --minecraft-jar "C:\path\to\26.3.jar" --mods .local\java-mod-bridge\build\morizen-registry-test-mod.jar
+               Everything it generates stays under .local\, including
+               .local\java-mod-bridge\in-game\config.json. Point --mods at your own jar or mods
+               folder instead to load other mods.
+            3. Set up and start:
+                 py -3 setup.py
+               The script copies your newest prepared Morizen launcher version to
+               "morizen-java-mods", puts this kit's game binaries in it, copies the bridge config
+               into the game home's java-mods folder, selects the version, and starts the
+               launcher. Add --no-start to stop before starting it.
+            4. Press Play.
+
+          Proving it loaded (in the game)
+            give @s morizen_registry:ruby
+            setblock ~ ~ ~ morizen_registry:ruby_lamp
+            The block and item come from a Java mod's registry calls. The bridge also writes a
+            compatibility report under the config's report_path.
+
+          Changing the config later
+            Settings > Game > "Java mods config" names any config.json. Empty uses the instance's
+            own java-mods\config.json. Both are unset in ordinary launchers, which do not read the
+            variable at all.
+          '@ | Set-Content "$dist/README.txt" -Encoding utf8
       - name: Upload the Windows build
         uses: actions/upload-artifact@v4
         with:
-          name: morizen-java-mods-windows-x64
-          path: |
-            target/fast/horizon-client.exe
-            target/fast/horizon-ctl.exe
+          name: morizen-windows-x64-java-mods
+          path: dist/morizen-windows-x64-java-mods
           if-no-files-found: error
           retention-days: 14

@@ -31,9 +31,9 @@ its harnesses. That audit is Horizon's, and it lives in
 
 Morizen itself is a **development build**, not a distribution:
 
-- Game releases and the mod registry still come from `horizon-rust/horizon`; Mojang's Minecraft
-  version list is also unchanged. Launcher updates come only from `its-Kobi/Morizen`, so an
-  upstream Horizon launcher can no longer replace Morizen's branding.
+- Game releases and launcher updates come only from `its-Kobi/Morizen`, so neither an upstream
+  Horizon game build nor its launcher can replace a Morizen install. Mojang's Minecraft version
+  list is unchanged; the mod registry still comes from `horizon-rust/horizon`.
 - Some internal package names and file paths still use `horizon` for compatibility.
 - Some docs still describe Horizon, and the game's own screens still say "Horizon Settings".
 

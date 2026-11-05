@@ -625,6 +625,38 @@ gates exist, both entries remain `unsupported` in `compat-ledger.json`.
 | 6 | One Fabric API module or Mixin pattern per change, with transformed-shim and engine tests; instruction-sensitive gaps stay reported. |
 | 7 | Quilt gets provider/entrypoint tests; NeoForge/Forge each require a new bootstrap/event/mapping design before code. |
 
+## Experimental launcher build
+
+Phases 1-7 were demonstrated with the game alone. Players now test from the launcher. The
+launcher has its own `java-mods` Cargo feature, off by default, so released launchers are
+unchanged:
+
+- Settings > Game > **Java mods config** names the bridge config. Empty means the instance's own
+  `<instance home>/java-mods/config.json`.
+- Play passes `MORIZEN_JAVA_MOD_CONFIG` to the game; a game built without the game-side
+  `java-mods` feature ignores it.
+
+The `java mod bridge` workflow (`.github/workflows/java-mod-bridge.yml`) builds on Windows and
+uploads `morizen-windows-x64-java-mods`: `horizon-launcher.exe`, the bridge's game
+(`horizon-client.exe`, `horizon-ctl.exe`), the original generators and the original
+`compat-java/` sources. No generated shim, bridge jar or Mojang file is uploaded.
+
+To test on your own machine (nothing is compiled locally):
+
+1. `py -3 tools/java_mod_bridge.py game-config --minecraft-jar <your 26.3 jar> --mods <jar or
+   folder>` builds the bridge jars from your own jar with a JDK and writes
+   `.local/java-mod-bridge/in-game/config.json`. Everything stays under `.local/`.
+2. Unpack the downloaded kit and run `py -3 setup.py` from it. The script copies your newest
+   prepared launcher version to `morizen-java-mods`, puts the kit's game binaries in it, copies
+   the config to the game home's `java-mods/`, selects the version and starts the launcher.
+   `--no-start` stops before starting it; `--tag` names the version.
+3. Press Play, then `give @s morizen_registry:ruby` and
+   `setblock ~ ~ ~ morizen_registry:ruby_lamp`: they come from a Java mod's registry calls.
+
+The kit needs an already prepared Morizen version, because preparation uses the exporters built
+with the pinned vanilla jars, which a hosted runner cannot build and no artifact may carry. The
+prepared version is copied, never modified.
+
 ## Test layout
 
 Test mods under `compat-java/test-mods/` begin with Phase 1's `empty` and `failing`; later phases add

@@ -242,6 +242,13 @@ struct Launcher {
     proxy_input: line_edit::LineEdit,
     proxy_focused: bool,
     proxy_focus: FocusHandle,
+    /// Settings' Java bridge config field (`java_bridge`, in `java-mods` builds).
+    #[cfg(feature = "java-mods")]
+    java_config_input: line_edit::LineEdit,
+    #[cfg(feature = "java-mods")]
+    java_config_focused: bool,
+    #[cfg(feature = "java-mods")]
+    java_config_focus: FocusHandle,
     /// Opt-in data collection: the player's answer and Settings' section (`collection`).
     collection: collection::Collection,
     /// Settings' "Connect an AI agent" (`agents_page`).
@@ -415,6 +422,20 @@ impl Launcher {
             ),
             proxy_focused: false,
             proxy_focus: cx.focus_handle(),
+            #[cfg(feature = "java-mods")]
+            java_config_input: line_edit::LineEdit::new(
+                settings
+                    .java_mods_config
+                    .as_ref()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_default(),
+                4096,
+                40,
+            ),
+            #[cfg(feature = "java-mods")]
+            java_config_focused: false,
+            #[cfg(feature = "java-mods")]
+            java_config_focus: cx.focus_handle(),
             settings,
             links: backend::Links::default(),
             preparing: false,
@@ -3270,6 +3291,7 @@ impl Launcher {
                     .child(self.proxy_row(n + 4, cx))
                     .child(group("Game", "gamepad"))
                     .child(self.game_args_row(n + 5, cx))
+                    .child(self.java_mods_row(n + 5, cx))
                     .child(self.native_mods_row(n + 5, cx))
                     .child(group("AI", "terminal"))
                     .child(self.no_ai_row(n + 6, cx))
@@ -3495,6 +3517,79 @@ impl Launcher {
             Some(field.into_any_element()),
             &t,
         )
+    }
+
+    /// Settings' Java bridge row (`java_bridge`, in `java-mods` builds): the config the game's
+    /// opt-in embedded JVM reads. Empty uses the instance's own `java-mods/config.json`.
+    #[cfg(feature = "java-mods")]
+    fn java_mods_row(&self, n: usize, cx: &mut Context<Self>) -> Div {
+        let t = self.theme;
+        let focused = self.java_config_focused;
+        let field = div()
+            .id("java-mods-config")
+            .track_focus(&self.java_config_focus)
+            .flex()
+            .items_center()
+            .w(px(300.))
+            .h(px(30.))
+            .px(px(12.))
+            .overflow_hidden()
+            .border_2()
+            .border_color(if focused { t.accent } else { t.outline })
+            .bg(t.well)
+            .font_family(theme::MONO)
+            .text_size(px(12.))
+            .cursor_text()
+            .child(line_edit::content(
+                &self.java_config_input,
+                &t,
+                focused,
+                false,
+                false,
+                "…/java-mods/config.json",
+            ))
+            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                window.focus(&this.java_config_focus);
+                cx.notify();
+            }))
+            .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
+                match line_edit::handle(&mut this.java_config_input, ev, cx) {
+                    line_edit::Key::Pass => return,
+                    line_edit::Key::Escape => window.blur(),
+                    line_edit::Key::Edited => {
+                        let text = this.java_config_input.text().trim().to_string();
+                        this.settings.java_mods_config =
+                            (!text.is_empty()).then(|| std::path::PathBuf::from(text));
+                        this.settings.save();
+                    }
+                    _ => {}
+                }
+                cx.stop_propagation();
+                cx.notify();
+            }));
+        let field = line_edit::mouse(field, cx, |this| &mut this.java_config_input);
+        index_row(
+            n,
+            tr("Java mods config"),
+            Some(
+                div()
+                    .child(
+                        "The config a tools/java_mod_bridge.py run writes (docs/java-mod-bridge.md). \
+                         Leave empty to use the instance's own java-mods/config.json. Applies the \
+                         next time the game starts."
+                            .to_string(),
+                    )
+                    .into_any_element(),
+            ),
+            Some(field.into_any_element()),
+            &t,
+        )
+    }
+
+    /// Ordinary launchers have no bridge, so Settings has no row for it.
+    #[cfg(not(feature = "java-mods"))]
+    fn java_mods_row(&self, _n: usize, _cx: &mut Context<Self>) -> Div {
+        div()
     }
 
     /// Settings' Proxy row: the HTTP proxy every download and sign-in goes through, kept in
@@ -4244,6 +4339,10 @@ impl Render for Launcher {
         self.mods.note_focus(window);
         self.args_focused = self.args_focus.is_focused(window);
         self.proxy_focused = self.proxy_focus.is_focused(window);
+        #[cfg(feature = "java-mods")]
+        {
+            self.java_config_focused = self.java_config_focus.is_focused(window);
+        }
         let size = window.viewport_size();
         let banner_width = f32::from(size.width) - theme::SIDEBAR - scrollbar::GUTTER;
         let content = match self.page {

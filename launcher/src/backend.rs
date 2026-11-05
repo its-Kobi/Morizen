@@ -9,13 +9,15 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
-/// The upstream engine repository. Game builds, their signed checksums and native-mod source
-/// revisions continue to come from Horizon.
+/// The upstream engine repository, kept for its pre-signing release pins
+/// (`crates/horizon-release-sign/legacy-releases.txt`).
 pub const REPO: &str = "horizon-rust/horizon";
-/// This fork's repository. Only launcher self-updates come from here, so an upstream Horizon
-/// launcher can never replace Morizen's branding and settings.
-pub const LAUNCHER_REPO: &str = "its-Kobi/Morizen";
-pub const README_URL: &str = "https://github.com/horizon-rust/horizon/blob/main/launcher/README.md";
+/// This fork's repository. Game builds, their signed checksums, native-mod sources and launcher
+/// self-updates all come from here, so no upstream Horizon update can replace a Morizen install.
+pub const GAME_REPO: &str = "its-Kobi/Morizen";
+/// Morizen's launcher releases live beside the game's.
+pub const LAUNCHER_REPO: &str = GAME_REPO;
+pub const README_URL: &str = "https://github.com/its-Kobi/Morizen/blob/main/launcher/README.md";
 /// The players' page on connecting an AI agent (the website's docs/agents.md).
 pub const AGENT_DOCS_URL: &str = "https://playhorizon.dev/docs/agents";
 /// This launcher's version: the release workflow sets `HORIZON_LAUNCHER_VERSION` from the
@@ -263,10 +265,10 @@ fn release_list_in(repo: &str) -> Result<serde_json::Value, String> {
     get(&url)?.into_json().map_err(|e| e.to_string())
 }
 
-/// Horizon's game releases. Keeping this source separate from [`launcher_release_list`] is what
-/// lets Morizen continue receiving game versions without replacing its launcher with Horizon's.
+/// Morizen's game releases. This used to be Horizon's list; pointing it at Morizen stops an
+/// upstream build from being offered as an update to a fork that adds Java mod support.
 fn release_list() -> Result<serde_json::Value, String> {
-    release_list_in(REPO)
+    release_list_in(GAME_REPO)
 }
 
 /// Morizen's own launcher releases. A missing/private repository or no launcher release simply
@@ -457,7 +459,7 @@ impl Links {
 
 /// The links from main, or the built-in ones when offline.
 pub fn links() -> Links {
-    let url = format!("https://raw.githubusercontent.com/{REPO}/main/launcher/links.json");
+    let url = format!("https://raw.githubusercontent.com/{GAME_REPO}/main/launcher/links.json");
     get(&url)
         .ok()
         .and_then(|r| r.into_string().ok())
@@ -548,11 +550,10 @@ pub(crate) fn fetch_small(url: &str) -> Result<Option<Vec<u8>>, String> {
     Ok(Some(body))
 }
 
-/// The SHA-256 the upstream game release's signed checksums give for `asset`, or why it must not
-/// be installed.
+/// The SHA-256 Morizen's signed game release gives for `asset`, or why it must not be installed.
 fn signed_digest(tag: &str, asset: &str) -> Result<String, String> {
     crate::signed::digest_in(
-        REPO,
+        GAME_REPO,
         tag,
         asset,
         &horizon_release_sign::trusted_keys(),
@@ -630,7 +631,8 @@ pub fn install(release: &Release, progress: impl Fn(f32)) -> Result<(), String> 
     let tag = release.tag.as_str();
     let sha256 = match &release.nightly {
         // Signed for the Nightly channel, served under its own GitHub tag.
-        Some(published) => crate::signed::nightly_digest(
+        Some(published) => crate::signed::nightly_digest_in(
+            GAME_REPO,
             published,
             ASSET.unwrap_or_default(),
             &horizon_release_sign::trusted_keys(),
@@ -2225,6 +2227,13 @@ pub fn client(tag: &str) -> Result<Command, String> {
         eprintln!("{e}");
     }
     append_game_args(&mut cmd);
+    // The opt-in Java bridge: only a game built with `java-mods` reads this.
+    #[cfg(feature = "java-mods")]
+    let _ = crate::java_bridge::apply(
+        &mut cmd,
+        &game_home(),
+        Settings::load().java_mods_config.as_deref(),
+    );
     Ok(cmd)
 }
 
@@ -2368,7 +2377,7 @@ fn launcher_update_from(releases: &[Release], own: &str) -> Option<Release> {
         .cloned()
 }
 
-/// Load Horizon's game releases, then independently look for a launcher release in Morizen's own
+/// Load Morizen's game releases, then independently look for a launcher release in the same
 /// repository. Publish the game releases first, so the separate launcher request cannot hold up
 /// the release pages or opening animation. A missing launcher repository means no self-update;
 /// it never falls back to an upstream Horizon launcher.
@@ -3015,6 +3024,11 @@ pub struct Settings {
     /// The player has read what installing a native mod starts (`native_mods::needs_notice`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub native_mods_noticed: bool,
+    /// The `java-mods` bridge config the game reads (docs/java-mod-bridge.md). Unset uses the
+    /// instance's own `java-mods/config.json`; both are unset in ordinary launchers.
+    #[cfg(feature = "java-mods")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub java_mods_config: Option<PathBuf>,
 }
 
 impl Settings {
@@ -3420,6 +3434,39 @@ mod tests {
 
     /// Rolling a release back (`gh release edit <tag> --draft`, docs/release-flow.md) makes the
     /// previous one the newest again: it is what `install latest` and the update check offer.
+    /// Morizen's repository is the only source of game builds: an upstream Horizon release list
+    /// is no longer read, and Morizen's non-game `Release` tag is not mistaken for one.
+    #[test]
+    fn only_morizen_publishes_game_builds() {
+        assert_eq!(GAME_REPO, "its-Kobi/Morizen");
+        assert_eq!(LAUNCHER_REPO, GAME_REPO);
+        assert_ne!(GAME_REPO, REPO);
+        let list = serde_json::json!([
+            {
+                "tag_name": "Release",
+                "prerelease": true,
+                "assets": [{
+                    "name": "morizen-launcher-windows-x64.zip",
+                    "browser_download_url": "launcher",
+                    "size": 1
+                }]
+            },
+            {
+                "tag_name": "v2026.11.05",
+                "assets": [{
+                    "name": ASSET.unwrap_or("horizon-windows-x64.zip"),
+                    "browser_download_url": "game",
+                    "size": 1
+                }]
+            },
+        ]);
+        let games = game_releases(&list);
+        assert_eq!(
+            games.iter().map(|r| r.tag.as_str()).collect::<Vec<_>>(),
+            ["v2026.11.05"]
+        );
+    }
+
     #[test]
     fn withdrawn_release_is_never_offered() {
         let asset = ASSET.unwrap_or("horizon-linux-x86_64.tar.gz");

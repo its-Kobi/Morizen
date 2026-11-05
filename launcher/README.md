@@ -12,7 +12,7 @@ The opening, then Play ([clip](docs/opening.webm)):
 
 ## What it does
 
-- **Versions**: lists the published builds of horizon-rust/horizon (the current Nightly, the last
+- **Versions**: lists the published builds of `its-Kobi/Morizen` (the current Nightly, the last
   week's, then the releases from before), installs the build for this platform into its own
   folder, and removes it again.
 - **Play**: prepares resources as `PLAY.txt` describes (your launcher's 26.3 install, the
@@ -266,9 +266,9 @@ The launcher looks for a newer Nightly when it starts and every 30 minutes while
 shows a small "available, Install" line on Play.
 
 It also updates itself only from Morizen's own `its-Kobi/Morizen` GitHub releases tagged
-`launcher@X.Y.Z`. Game versions still come from `horizon-rust/horizon` (`nightly`, and `vX.Y.Z`
-before 2026-10-28), and neither source is ever taken for the other. Before 0.2 the tags were
-`launcher-vX.Y.Z` and `vYYYY.MM.DD`:
+`launcher@X.Y.Z`. Game versions come from the same repository (`nightly`, and `vX.Y.Z` before
+2026-10-28), never from upstream Horizon, and neither source is ever taken for the other. Before
+0.2 the tags were `launcher-vX.Y.Z` and `vYYYY.MM.DD`:
 every 0.2 tag counts as newer than all of those (docs/versioning.md). It downloads the new build,
 replaces its own binary and restarts into it after the player presses **Update**; there is no
 second confirmation. Development builds and

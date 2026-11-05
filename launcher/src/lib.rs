@@ -15,6 +15,8 @@ pub mod i18n;
 pub mod import;
 pub mod instances;
 pub mod java;
+#[cfg(feature = "java-mods")]
+pub mod java_bridge;
 pub mod java_launch;
 pub mod launch;
 pub mod loaders;
