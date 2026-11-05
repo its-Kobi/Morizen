@@ -74,7 +74,7 @@ pub(super) struct Mods {
     more: bool,
     error: Option<String>,
     installed: Vec<installed::Entry>,
-    loaded: bool,
+    pub(super) loaded: bool,
     /// The game folder the browser installs into and lists: the selected instance's.
     home: Option<PathBuf>,
     /// The selected Java instance's version and loader: its mods and resource packs are the
