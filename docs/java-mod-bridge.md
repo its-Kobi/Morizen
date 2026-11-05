@@ -636,26 +636,28 @@ unchanged:
 - Play passes `MORIZEN_JAVA_MOD_CONFIG` to the game; a game built without the game-side
   `java-mods` feature ignores it.
 
-The `java mod bridge` workflow (`.github/workflows/java-mod-bridge.yml`) builds on Windows and
-uploads `morizen-windows-x64-java-mods`: `horizon-launcher.exe`, the bridge's game
-(`horizon-client.exe`, `horizon-ctl.exe`), the original generators and the original
-`compat-java/` sources. No generated shim, bridge jar or Mojang file is uploaded.
+The `java mod bridge` workflow (`.github/workflows/java-mod-bridge.yml`) builds on Windows. It
+uploads a launcher-only artifact, `morizen-launcher-windows-x64`, and publishes the game as a
+signed release of `its-Kobi/Morizen` (`v<date>.<run>`, asset `horizon-windows-x64.zip`). The
+launcher downloads that release from its Versions page, so the game is never bundled in the
+launcher artifact. Releases are signed with Morizen's own key in
+`crates/horizon-release-sign/release-keys.txt`; the private key is the repository's
+`RELEASE_SIGNING_KEY` secret. No generated shim, bridge jar or Mojang file is uploaded.
 
-To test on your own machine (nothing is compiled locally):
+To test on your own machine:
 
-1. `py -3 tools/java_mod_bridge.py game-config --minecraft-jar <your 26.3 jar> --mods <jar or
+1. Unpack the launcher artifact, start `horizon-launcher.exe`, install the newest Morizen build
+   on Versions, and start it once so its resources are prepared.
+2. `py -3 tools/java_mod_bridge.py game-config --minecraft-jar <your 26.3 jar> --mods <jar or
    folder>` builds the bridge jars from your own jar with a JDK and writes
    `.local/java-mod-bridge/in-game/config.json`. Everything stays under `.local/`.
-2. Unpack the downloaded kit and run `py -3 setup.py` from it. The script copies your newest
-   prepared launcher version to `morizen-java-mods`, puts the kit's game binaries in it, copies
-   the config to the game home's `java-mods/`, selects the version and starts the launcher.
-   `--no-start` stops before starting it; `--tag` names the version.
-3. Press Play, then `give @s morizen_registry:ruby` and
-   `setblock ~ ~ ~ morizen_registry:ruby_lamp`: they come from a Java mod's registry calls.
+3. In Settings > Game > **Java mods config**, name that `config.json` (empty uses the instance's
+   own `java-mods/config.json`), then press Play.
+4. In the game, `give @s morizen_registry:ruby` and
+   `setblock ~ ~ ~ morizen_registry:ruby_lamp` come from a Java mod's registry calls.
 
-The kit needs an already prepared Morizen version, because preparation uses the exporters built
-with the pinned vanilla jars, which a hosted runner cannot build and no artifact may carry. The
-prepared version is copied, never modified.
+The release carries the preparer and its sources, so a fresh install prepares on the player's
+machine from their own Minecraft; exporters are compiled there, never shipped.
 
 ## Test layout
 
