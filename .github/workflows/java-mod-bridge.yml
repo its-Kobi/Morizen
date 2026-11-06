@@ -1,21 +1,27 @@
-name: java mod bridge
-# Builds the opt-in Java bridge: the game (published as a signed Morizen release the launcher
-# downloads) and the launcher-only Windows build that installs it. The bridge stays off in every
-# ordinary build (`docs/java-mod-bridge.md`).
+name: Morizen launcher
+
+# Morizen publishes only its launcher. The game itself is downloaded from the signed releases of
+# horizon-rust/horizon; no game executable is built or put in this release.
 on:
   push:
-    branches: [main, feature/java-mod-bridge]
+    branches: [main]
   workflow_dispatch:
+
 permissions:
   contents: read
+
 jobs:
   windows:
     runs-on: windows-latest
-    timeout-minutes: 120
+    timeout-minutes: 60
     env:
-      # The launcher's ci.yml build links the C runtime in, so the downloaded programme
-      # runs without the Visual C++ redistributable; the game gets the same treatment.
       RUSTFLAGS: -C target-feature=+crt-static
+      # The fixed release tag cannot identify its contents, so the launcher and release notes both
+      # carry the commit id. Future launchers compare it when checking for an update.
+      HORIZON_LAUNCHER_BUILD: ${{ github.sha }}
+    defaults:
+      run:
+        working-directory: launcher
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -23,118 +29,41 @@ jobs:
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: java-mod-bridge-windows
-          workspaces: |
-            .
-            launcher
+          shared-key: morizen-launcher-windows
+          workspaces: launcher
       - name: Check formatting
         run: cargo fmt --check
-      - name: Check the launcher's formatting
-        working-directory: launcher
-        run: cargo fmt --check
-      - name: Test the bridge's Rust side
-        run: cargo test --locked -p morizen-compat
-      - name: Test the launcher's bridge wiring
-        working-directory: launcher
-        run: cargo test --locked --features java-mods --lib
-      - name: Test the launcher setup tool
-        run: python -m unittest discover -s tests -p "test_java_mods_launcher.py"
-      - name: Build the game with the Java bridge
-        run: cargo build --profile fast --locked -p horizon-client --bin horizon-client --bin horizon-ctl --features java-mods
-      - name: Build the preparer the launcher runs beside the game
-        run: cargo build --profile fast --locked -p horizon-prepare --bin horizon-prepare
-      - name: Build the launcher with the bridge row
-        working-directory: launcher
-        run: cargo build --release --locked --features java-mods
-      # The game release the launcher downloads. It is the usual release layout (the programs,
-      # the preparer and its sources, PLAY.txt) so a fresh install prepares from the player's
-      # own Minecraft; the exporters are compiled on that machine, never shipped.
-      - name: Package the game release
+      - name: Test the launcher
+        run: cargo test --locked --lib
+      - name: Build the launcher
+        run: cargo build --release --locked
+      - name: Package launcher only
         shell: pwsh
-        run: |
-          $game = "dist/horizon-windows-x64"
-          New-Item -ItemType Directory -Force -Path $game | Out-Null
-          Copy-Item target/fast/horizon-client.exe, target/fast/horizon-ctl.exe, target/fast/horizon-prepare.exe $game
-          Copy-Item research-lock.json, LICENSE $game
-          Copy-Item packaging/PLAY.txt $game
-          New-Item -ItemType Directory -Force -Path "$game/crates" | Out-Null
-          Copy-Item crates/horizon-prepare "$game/crates/horizon-prepare" -Recurse
-          New-Item -ItemType Directory -Force -Path "$game/mods/horizon/src/test" | Out-Null
-          Copy-Item mods/horizon/src/test/java "$game/mods/horizon/src/test/java" -Recurse
-          Compress-Archive -Path $game -DestinationPath dist/horizon-windows-x64.zip -CompressionLevel Optimal
-      # The launcher only: no game binaries. Its Versions page installs the signed Morizen
-      # release the publish job below makes; tools/ builds the bridge config from the player's
-      # own 26.3 jar, and compat-java/ holds the original sources.
-      - name: Package the launcher
-        shell: pwsh
+        working-directory: .
         run: |
           $app = "dist/morizen-launcher-windows-x64"
-          New-Item -ItemType Directory -Force -Path "$app/tools", "$app/tools/benchmark-deps" | Out-Null
+          New-Item -ItemType Directory -Force -Path $app | Out-Null
           Copy-Item launcher/target/release/horizon-launcher.exe $app
-          Copy-Item tools/lab.py, tools/runtime.py, tools/gen_compat.py, tools/compat_ledger.py, tools/java_mod_bridge.py $app/tools
-          Copy-Item tools/benchmark-deps/* $app/tools/benchmark-deps
-          Copy-Item compat-java $app/compat-java -Recurse
-          Copy-Item docs/java-mod-bridge.md "$app/JAVA-MODS.md"
           @'
-          Morizen: Windows launcher with the Java mod bridge
-          ==================================================
+          Morizen launcher
+          ================
 
-          This is the launcher only. It installs the newest signed Morizen game build from the
-          Morizen releases (its Versions page), and that game runs real Fabric and Quilt mods in
-          an embedded JVM (JAVA-MODS.md). Forge and NeoForge are not supported for 26.3. The
-          bridge is off in ordinary builds.
+          Start horizon-launcher.exe. Game versions are the official signed Horizon Rust builds
+          from horizon-rust/horizon. Open Mods in the launcher to add or remove reviewed projects
+          from https://playhorizon.dev/mods without downloading files by hand.
 
-          Always take the launcher from the release tagged release-launcher. The game releases
-          (game-v...) are not for installing by hand: the launcher downloads them.
-
-          What is here
-            horizon-launcher.exe   the launcher (Settings > Game > Java mods config)
-            tools/                 the original bridge generators (Python, no Mojang files)
-            compat-java/           the original provider, bootstrap and test-mod sources
-
-          Once, on this computer
-            1. Install Java 25 (a JDK) and have your own Minecraft 26.3 client jar.
-            2. Start horizon-launcher.exe and install the newest Morizen build on Versions,
-               then start it once so the launcher prepares its resources.
-            3. Make a Minecraft: Java Edition instance (New instance > Game > Minecraft Java,
-               pick a version and Fabric or Quilt) to play Java mods the ordinary way, or build
-               the bridge from your own jar and write its config (Java only, not Rust):
-                 py -3 tools\java_mod_bridge.py game-config --minecraft-jar "C:\path\to\26.3.jar" --mods .local\java-mod-bridge\build\morizen-registry-test-mod.jar
-               Everything it generates stays under .local\, including
-               .local\java-mod-bridge\in-game\config.json. Point --mods at your own jar or mods
-               folder instead to load other mods.
-            4. Settings > Game > "Java mods config": paste the config.json path from step 3.
-            5. Press Play.
-
-          Proving it loaded (in the game)
-            give @s morizen_registry:ruby
-            setblock ~ ~ ~ morizen_registry:ruby_lamp
-            The block and item come from a Java mod's registry calls. The bridge also writes a
-            compatibility report under the config's report_path.
-
-          Updates
-            Game builds and launcher updates come only from its-Kobi/Morizen. Upstream Horizon
-            game builds are never offered.
+          This archive contains the launcher only; it does not bundle the game.
           '@ | Set-Content "$app/README.txt" -Encoding utf8
-      - name: Upload the game release
-        uses: actions/upload-artifact@v4
-        with:
-          name: morizen-game-windows-x64
-          path: dist/horizon-windows-x64.zip
-          if-no-files-found: error
-          retention-days: 14
-      - name: Upload the launcher
-        uses: actions/upload-artifact@v4
+          Compress-Archive -Path "$app/*" -DestinationPath dist/morizen-launcher-windows-x64.zip -CompressionLevel Optimal
+      - uses: actions/upload-artifact@v4
         with:
           name: morizen-launcher-windows-x64
-          path: dist/morizen-launcher-windows-x64
+          path: dist/morizen-launcher-windows-x64.zip
           if-no-files-found: error
           retention-days: 14
+
   publish:
-    # Main only: the signed game build the launcher installs, and the launcher release players
-    # download (tag `release-launcher`, replaced every time). The private key exists only as the
-    # repository secret; this job signs the archives the build job made and never runs them.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main'
     needs: windows
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -144,72 +73,39 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: morizen-game-windows-x64
-          path: dist/game
-      - uses: actions/download-artifact@v4
-        with:
           name: morizen-launcher-windows-x64
-          path: dist/launcher
-      - name: Zip the launcher
-        run: |
-          cd dist/launcher
-          zip -qr ../morizen-launcher-windows-x64.zip .
-      - name: Sign the checksums
+          path: dist
+      - name: Sign the launcher
         env:
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
-        run: |
-          tag="game-v$(date -u +%Y.%m.%d).${GITHUB_RUN_NUMBER}"
-          bash tools/ci/sign_release.sh "$tag" dist/game/horizon-windows-x64.zip
-          bash tools/ci/sign_release.sh release-launcher dist/morizen-launcher-windows-x64.zip
-          echo "TAG=$tag" >> "$GITHUB_ENV"
-      - name: Publish the game build
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          cat > "$RUNNER_TEMP/game-notes.md" <<'EOF'
-          **This is the game, not the launcher: do not install it by hand.** The Morizen launcher
-          downloads this archive itself, from its Versions page, and checks it against the signed
-          `SHA256SUMS` below.
-
-          Windows build with the opt-in Java mod bridge (JAVA-MODS.md in the launcher). The
-          launcher you download by hand is the release tagged **release-launcher**.
-          EOF
-          gh release create "$TAG" \
-            dist/game/horizon-windows-x64.zip dist/game/SHA256SUMS dist/game/SHA256SUMS.sig \
-            --title "Morizen game ${TAG#game-}" \
-            --notes-file "$RUNNER_TEMP/game-notes.md" \
-            --latest=false
-      - name: Publish the launcher
+        run: bash tools/ci/sign_release.sh release-launcher dist/morizen-launcher-windows-x64.zip
+      - name: Publish release-launcher
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           cat > "$RUNNER_TEMP/launcher-notes.md" <<'EOF'
           # **This is the one you install.**
 
-          Download **morizen-launcher-windows-x64.zip** here, unpack it and start
-          `horizon-launcher.exe`. It is the whole launcher; the game is not inside it.
+          Download **morizen-launcher-windows-x64.zip**, unpack it and start
+          `horizon-launcher.exe`.
 
-          **Do not install any of the other releases.** They are tagged `game-v…` because they are
-          the game builds, and the launcher downloads the newest of them for you. Nothing else on
-          this page is meant to be downloaded by hand, except the launcher here.
+          - Minecraft Rust game versions come from the original, signed
+            [`horizon-rust/horizon`](https://github.com/horizon-rust/horizon/releases) releases.
+          - Morizen launcher updates come from this release.
+          - The **Mods** page installs and removes reviewed projects from the official
+            [Horizon mods catalogue](https://playhorizon.dev/mods) inside the launcher.
+          - Modrinth and CurseForge are not offered.
 
-          What it does
-          - installs the newest signed Morizen game build from this repository's releases;
-          - makes Minecraft: Java Edition instances (choose Fabric or Quilt, then install mods from
-            the Mods page or by dropping a `.jar` on the window);
-          - runs the Java mod bridge inside the Morizen game (JAVA-MODS.md), off in ordinary builds.
-
-          The archive is replaced by every launcher build from `main`; this tag always points at
-          the newest one. `SHA256SUMS` and `SHA256SUMS.sig` are beside it, signed with Morizen's
-          release key.
+          The archive contains **only the launcher**, not the game.
           EOF
+          printf '\n<!-- morizen-build: %s -->\n' "$GITHUB_SHA" >> "$RUNNER_TEMP/launcher-notes.md"
           if gh release view release-launcher > /dev/null 2>&1; then
             gh release edit release-launcher \
-              --title "Morizen launcher — install this one" \
+              --title "Morizen launcher - install this one" \
               --notes-file "$RUNNER_TEMP/launcher-notes.md" --latest
           else
             gh release create release-launcher \
-              --title "Morizen launcher — install this one" \
+              --title "Morizen launcher - install this one" \
               --notes-file "$RUNNER_TEMP/launcher-notes.md" --latest
           fi
           gh release upload release-launcher \

@@ -636,27 +636,16 @@ unchanged:
 - Play passes `MORIZEN_JAVA_MOD_CONFIG` to the game; a game built without the game-side
   `java-mods` feature ignores it.
 
-The `java mod bridge` workflow (`.github/workflows/java-mod-bridge.yml`) builds on Windows. It
-publishes two kinds of release on `its-Kobi/Morizen`, which the workflow documents and are the
-repository's convention:
-
-- **`release-launcher`** — the launcher players download by hand. One release whose archive,
-  `morizen-launcher-windows-x64.zip`, is replaced by every launcher build, so this tag always
-  points at the newest launcher. It is the release GitHub marks as latest.
-- **`game-v<date>.<run>`** — the game build, asset `horizon-windows-x64.zip`, signed with
-  `SHA256SUMS`/`SHA256SUMS.sig`. It is never installed by hand: the launcher downloads and
-  verifies it from its Versions page, so the game is not bundled in the launcher.
-
-Older releases used a bare `v<date>.<run>` tag; `is_game_tag` still accepts that form. Releases
-are signed with Morizen's own key in `crates/horizon-release-sign/release-keys.txt`; the private
-key is the repository's `RELEASE_SIGNING_KEY` secret. No generated shim, bridge jar or Mojang
-file is uploaded.
+The published Morizen launcher does not enable this experimental feature. Its Windows workflow
+(`.github/workflows/java-mod-bridge.yml`, retained at that path for history) builds only the
+default launcher and updates **`release-launcher`**. Game versions come directly from the signed
+releases of `horizon-rust/horizon`; Morizen publishes no game build. No generated shim, bridge jar
+or Mojang file is uploaded.
 
 To test on your own machine:
 
-1. Download and unpack the **`release-launcher`** release (`morizen-launcher-windows-x64.zip`),
-   start `horizon-launcher.exe`, install the newest Morizen build on Versions, and start it once
-   so its resources are prepared.
+1. Build the launcher and game from source with their opt-in `java-mods` features, then prepare
+   that local test build from your own Minecraft installation.
 2. `py -3 tools/java_mod_bridge.py game-config --minecraft-jar <your 26.3 jar> --mods <jar or
    folder>` builds the bridge jars from your own jar with a JDK and writes
    `.local/java-mod-bridge/in-game/config.json`. Everything stays under `.local/`.
@@ -664,9 +653,6 @@ To test on your own machine:
    own `java-mods/config.json`), then press Play.
 4. In the game, `give @s morizen_registry:ruby` and
    `setblock ~ ~ ~ morizen_registry:ruby_lamp` come from a Java mod's registry calls.
-
-The release carries the preparer and its sources, so a fresh install prepares on the player's
-machine from their own Minecraft; exporters are compiled there, never shipped.
 
 ## Test layout
 

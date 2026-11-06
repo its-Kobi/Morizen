@@ -561,9 +561,7 @@ impl Launcher {
         {
             return;
         }
-        let version = backend::launcher_version(&release.tag)
-            .unwrap_or_default()
-            .to_string();
+        let version = backend::launcher_label(&release);
         self.self_update = SelfUpdate::Downloading(version, 0.);
         let tx = self.tx.clone();
         std::thread::spawn(move || {
@@ -2172,9 +2170,7 @@ impl Launcher {
             }
             SelfUpdate::Idle if backend::self_update_allowed() => {
                 if let Some(release) = self.updates.launcher.clone() {
-                    let version = backend::launcher_version(&release.tag)
-                        .unwrap_or_default()
-                        .to_string();
+                    let version = backend::launcher_label(&release);
                     let available = trf("{version} available", &[("version", &version)]);
                     foot = foot.child(
                         blocks::panel(&t)
@@ -3163,10 +3159,7 @@ impl Launcher {
                     backend::VERSION,
                     trf(
                         "{version} available",
-                        &[(
-                            "version",
-                            backend::launcher_version(&r.tag).unwrap_or_default()
-                        )]
+                        &[("version", &backend::launcher_label(r))]
                     )
                 ),
                 None if self.checked.is_some() && self.update_error.is_none() => {

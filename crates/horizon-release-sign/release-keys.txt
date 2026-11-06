@@ -3,5 +3,5 @@
 # The private keys exist only as the RELEASE_SIGNING_KEY secret(s) of the repository's `release` environment.
 # Changing this file needs Ludovic's review (.github/CODEOWNERS).
 MU4oiIQcCxkZvbwSjjXs7SySCuM6ywRQ3nGaJYZG0gw=
-# Morizen's own release key (its-Kobi/Morizen): signs the java-mods game builds the launcher installs.
+# Morizen's own release key (its-Kobi/Morizen): signs the launcher-only release.
 gJSbfhRGRublcSre2ZdXy6+PvqIPQN4c2D3GzCZ/NnY=

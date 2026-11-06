@@ -1,9 +1,5 @@
-//! The Mods page: search Morizen's own registry for mods made for Morizen, or Modrinth
-//! (CurseForge: coming soon) for Java mods, modpacks and resource packs, see where each comes
-//! from and how well it runs (a Java mod's jar is checked first; a Morizen mod says whether it is
-//! signed and what it may do), install it with its checksum checked, turn Morizen mods on and
-//! off, and update or remove what was installed (`horizon_launcher::browser`). Imported modpacks
-//! are listed on its Modpacks tab.
+//! The Mods page: browse Horizon's reviewed registry in the launcher, add projects with one
+//! button, then turn mods on and off, update them or remove them (`horizon_launcher::browser`).
 use super::line_edit::{self, Key, LineEdit};
 use super::*;
 use horizon_launcher::browser::{
@@ -17,20 +13,14 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// The kinds, as the Mods page's tabs: name and icon.
-const KINDS: [(PackKind, &str, &str); 5] = [
+const KINDS: [(PackKind, &str, &str); 4] = [
     (PackKind::Mod, "Mods", "box"),
     (PackKind::Modpack, "Modpacks", "archive"),
     (PackKind::ResourcePack, "Resource packs", "image"),
     (PackKind::Shader, "Shader packs", "zap"),
-    (PackKind::DataPack, "Data packs", "notes"),
 ];
 /// Java mods checked at once.
 const CHECKING: usize = 2;
-/// The sources to pick from; CurseForge is shown beside them as coming soon.
-const SOURCES: [(SourceId, &str); 2] = [
-    (SourceId::Modrinth, "Modrinth"),
-    (SourceId::Morizen, "Morizen"),
-];
 const PAGE: usize = 20;
 
 pub(super) enum Event {
@@ -144,13 +134,7 @@ impl Mods {
         };
         Self {
             kind,
-            // `HORIZON_LAUNCHER_SOURCE=horizon` opens on Morizen's registry, for screenshots;
-            // shader packs are only there.
-            source: match std::env::var("HORIZON_LAUNCHER_SOURCE").as_deref() {
-                _ if kind == PackKind::Shader => SourceId::Morizen,
-                Ok("horizon") => SourceId::Morizen,
-                _ => SourceId::Modrinth,
-            },
+            source: SourceId::Morizen,
             text: LineEdit::new(String::new(), 100, 40),
             focus: cx.focus_handle().tab_index(0).tab_stop(true),
             focused: false,
@@ -401,25 +385,12 @@ impl Launcher {
             m.results_list.reset();
             m.installed_list.reset();
         }
-        let query = match m.java_for(m.kind) {
-            Some(target) => Query {
-                offset,
-                limit: PAGE,
-                ..target.search(m.text.text(), m.kind, &m.browse.filters)
-            },
-            None => Query {
-                everything: m.everything,
-                offset,
-                limit: PAGE,
-                filters: m.browse.filters.clone(),
-                ..Query::new(m.text.text(), m.kind)
-            },
+        let query = Query {
+            offset,
+            limit: PAGE,
+            ..Query::new(m.text.text(), m.kind)
         };
-        // A Java instance's files are Modrinth's; Morizen's registry is for Morizen.
-        let source = match m.java_for(m.kind) {
-            Some(_) => SourceId::Modrinth,
-            None => m.source,
-        };
+        let source = SourceId::Morizen;
         let (tx, search) = (m.tx.clone(), m.search);
         std::thread::spawn(move || {
             let result = browser::source(source)
@@ -808,7 +779,7 @@ impl Launcher {
                 focused,
                 false,
                 false,
-                "Search, then Enter",
+                "Search official mods…",
             ))
             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                 window.focus(&this.mods.focus);
@@ -825,25 +796,6 @@ impl Launcher {
                 cx.notify();
             }));
         line_edit::mouse(field, cx, |this| &mut this.mods.text)
-    }
-
-    /// Picks local Fabric/Quilt jars and sends them through the same safe drop-import path.
-    fn choose_java_mods(&mut self, cx: &mut Context<Self>) {
-        let paths = cx.prompt_for_paths(PathPromptOptions {
-            files: true,
-            directories: false,
-            multiple: true,
-            prompt: Some("Add JAR".into()),
-        });
-        cx.spawn(async move |this, cx| {
-            if let Ok(Ok(Some(paths))) = paths.await {
-                let _ = this.update(cx, |this, cx| {
-                    this.import_dropped(paths, cx);
-                    cx.notify();
-                });
-            }
-        })
-        .detach();
     }
 
     pub(super) fn mods_page(&mut self, cx: &mut Context<Self>) -> Div {
@@ -876,12 +828,31 @@ impl Launcher {
         }
         let header = page_header(
             "Mods",
-            "Mods and shader packs made for Morizen from its own reviewed registry, and Java \
-             mods, modpacks and resource packs from Modrinth: Morizen ports what a Java mod \
-             carries (blocks, items, recipes, worldgen) and says before you install what runs. Each file is checked \
-             against its source's checksum before it reaches your game folder.",
+            "Add official Horizon mods without leaving the launcher. Pick one below and click \
+             Add to game; installed mods can be turned on, turned off or removed at any time. \
+             Every download is reviewed and checked before it reaches your game.",
             &t,
         );
+        if self.mods.java.is_some() {
+            return div()
+                .flex()
+                .flex_col()
+                .gap(px(32.))
+                .child(header)
+                .child(
+                    plate(&t)
+                        .flex()
+                        .flex_col()
+                        .gap(px(10.))
+                        .p(px(20.))
+                        .child(section_title("Choose a Morizen instance", "box", &t))
+                        .child(
+                            text(theme::UI)
+                                .text_color(t.ink_soft)
+                                .child("Official Horizon mods are made for the lightweight Rust edition. Select a Morizen instance on the left, then come back here to add them."),
+                        ),
+                );
+        }
         let this = cx.entity().downgrade();
         let kinds = blocks::tabs("mods-kind", &KINDS, self.mods.kind, &t, {
             let this = this.clone();
@@ -889,15 +860,6 @@ impl Launcher {
                 let _ = this.update(cx, |this, cx| {
                     if this.mods.kind != kind {
                         this.mods.kind = kind;
-                        // Morizen's own shader packs are on its registry only.
-                        if kind == PackKind::Shader {
-                            this.mods.source = SourceId::Morizen;
-                        }
-                        // Data packs are on Modrinth only; a world may have been made since.
-                        if kind == PackKind::DataPack {
-                            this.mods.source = SourceId::Modrinth;
-                            this.mods.read_worlds();
-                        }
                         // Categories and loaders differ by kind.
                         this.mods.browse.filters = Default::default();
                         this.mods.browse.open = None;
@@ -906,47 +868,6 @@ impl Launcher {
                     cx.notify();
                 });
             }
-        });
-        let everything = self.mods.everything;
-        let toggle = div()
-            .id("mods-everything")
-            .flex()
-            .items_center()
-            .gap(px(8.))
-            .cursor_pointer()
-            .child(switch("mods-everything-switch", everything, &t))
-            .child(
-                text(theme::LABEL)
-                    .text_color(t.ink_soft)
-                    .child("Show everything"),
-            )
-            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                this.mods.everything = !this.mods.everything;
-                this.mods_search(0);
-                cx.notify();
-            }));
-        // CurseForge support is coming soon: shown, inert, never searched (like the Microsoft
-        // account's "Coming soon").
-        // A Java instance's mods and resource packs come from Modrinth, for its version.
-        let java = self.mods.java_for(self.mods.kind).is_some();
-        let source_note = (self.mods.kind != PackKind::DataPack && !java)
-            .then(|| div().flex().child(self.mods_source_switch(cx)));
-        // The registry lists only what was made for Morizen: no "everything", no Modrinth filters.
-        let registry = self.mods.source == SourceId::Morizen;
-        let filters = (!registry).then(|| self.mods_filters(cx));
-        let add_jar = (self.mods.kind == PackKind::Mod
-            && self
-                .mods
-                .java
-                .as_ref()
-                .is_some_and(|target| target.loader.is_some()))
-        .then(|| {
-            button("mods-add-jar", "Add JAR…", Kind::Ghost, &t).on_click(cx.listener(
-                |this, _: &ClickEvent, _, cx| {
-                    this.choose_java_mods(cx);
-                    cx.notify();
-                },
-            ))
         });
         let controls = div()
             .flex()
@@ -959,11 +880,8 @@ impl Launcher {
                     .items_center()
                     .gap(px(12.))
                     .child(self.mods_field(cx))
-                    .when(!registry && !java, |d| d.child(toggle))
-                    .children(add_jar),
+                    .child(blocks::badge("Official Horizon", t.success, &t)),
             )
-            .children(source_note)
-            .children(filters)
             .children(self.mods_target_line(cx));
         // The kinds are inventory tabs on the panel that holds the open one.
         let body = blocks::panel(&t).flex().flex_col().gap(px(24.)).p(px(20.));
@@ -1182,7 +1100,7 @@ impl Launcher {
             let remove = button(
                 SharedString::from(format!("mods-remove-{}", e.project)),
                 if confirming {
-                    "Remove for good"
+                    "Click again to remove"
                 } else {
                     "Remove"
                 },
@@ -1337,11 +1255,11 @@ impl Launcher {
                     &t,
                 );
             } else if m.source == SourceId::Morizen {
-                "Nothing in Morizen's registry matches yet."
+                "No official Horizon projects match that search."
             } else if m.everything {
                 "Nothing found."
             } else {
-                "Nothing found that runs in Morizen. Show everything lists the rest."
+                "No official Horizon projects match that search."
             };
             return centered(line, &t);
         }
@@ -1366,18 +1284,6 @@ impl Launcher {
                 color,
                 &t,
             ));
-            let page_url = p.page.clone();
-            if !page_url.is_empty() {
-                right = right.child(
-                    button(
-                        SharedString::from(format!("mods-page-{}", p.id)),
-                        "Page",
-                        Kind::Ghost,
-                        &t,
-                    )
-                    .on_click(move |_, _, cx| cx.open_url(&page_url)),
-                );
-            }
             if busy == Some(p.id.as_str()) {
                 right = right.child(caps("Installing").text_color(t.accent));
             } else if m.entry(p).is_some() {
@@ -1388,12 +1294,12 @@ impl Launcher {
                 let label = if p.kind == PackKind::Modpack {
                     "Import"
                 } else {
-                    "Install"
+                    "Add to game"
                 };
                 let mut install = button(
                     SharedString::from(format!("mods-install-{}", p.id)),
                     label,
-                    Kind::Secondary,
+                    Kind::Primary,
                     &t,
                 );
                 if busy.is_some() {
@@ -1476,45 +1382,6 @@ impl Launcher {
         }
         out
     }
-}
-
-impl Launcher {
-    /// The source switch: Modrinth or Morizen's registry, CurseForge shown as coming soon and not
-    /// clickable, like the Microsoft account's "Coming soon".
-    fn mods_source_switch(&self, cx: &mut Context<Self>) -> Stateful<Div> {
-        let this = cx.entity().downgrade();
-        source_switch(&self.theme, self.mods.source, move |source, _, cx| {
-            let _ = this.update(cx, |this, cx| {
-                if this.mods.source != source {
-                    this.mods.source = source;
-                    this.mods.browse.filters = Default::default();
-                    this.mods.browse.open = None;
-                    this.mods_search(0);
-                }
-                cx.notify();
-            });
-        })
-    }
-}
-
-fn source_switch(
-    t: &Theme,
-    current: SourceId,
-    on_pick: impl Fn(SourceId, &mut Window, &mut App) + Clone + 'static,
-) -> Stateful<Div> {
-    let soon = div()
-        .flex()
-        .items_center()
-        .h(px(theme::SEGMENT))
-        .px(px(14.))
-        .pb(px(2.))
-        .opacity(theme::DISABLED)
-        .child(
-            blocks::pixel(14., FontWeight::MEDIUM)
-                .text_color(t.muted)
-                .child("CurseForge (coming soon)"),
-        );
-    segments("mods-source", &SOURCES, current, t, on_pick).child(soon)
 }
 
 #[cfg(test)]

@@ -12,7 +12,7 @@ pub fn asset_url(tag: &str, name: &str) -> String {
     asset_url_in(GAME_REPO, tag, name)
 }
 
-/// [`asset_url`] for an explicit repository (Morizen's game and launcher releases).
+/// [`asset_url`] for an explicit repository (upstream game or Morizen launcher releases).
 pub fn asset_url_in(repo: &str, tag: &str, name: &str) -> String {
     format!("https://github.com/{repo}/releases/download/{tag}/{name}")
 }
@@ -30,7 +30,7 @@ pub fn digest(
 }
 
 /// [`digest`] for a release in `repo`. The legacy pins belong only to upstream Horizon; a
-/// Morizen release must carry signed checksums of its own.
+/// A fork release must carry signed checksums of its own.
 pub fn digest_in(
     repo: &str,
     tag: &str,
@@ -100,7 +100,7 @@ mod tests {
             ),
             "https://github.com/its-Kobi/Morizen/releases/download/launcher@1.2.3/horizon-launcher-windows-x64.zip"
         );
-        assert!(asset_url("v1.2.3", "game.zip").contains("its-Kobi/Morizen"));
+        assert!(asset_url("v1.2.3", "game.zip").contains("horizon-rust/horizon"));
     }
 
     #[test]
@@ -129,7 +129,7 @@ mod tests {
         let signature = key.sign("v2099.01.01", sums.as_bytes());
         // GitHub as it answers for a signed release (any tag: the files are what a replay would serve).
         let signed = |url: &str| -> Result<Option<Vec<u8>>, String> {
-            assert!(url.starts_with("https://github.com/its-Kobi/Morizen/releases/download/"));
+            assert!(url.starts_with("https://github.com/horizon-rust/horizon/releases/download/"));
             Ok(Some(
                 if url.ends_with(".sig") {
                     signature.clone()

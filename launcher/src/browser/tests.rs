@@ -428,8 +428,9 @@ fn live_modrinth_search_pick_and_download() {
 }
 
 #[test]
-fn curseforge_is_coming_soon_and_never_searched() {
+fn only_the_official_horizon_registry_is_offered() {
     let ids: Vec<SourceId> = sources().iter().map(|s| s.id()).collect();
-    assert_eq!(ids, [SourceId::Modrinth, SourceId::Morizen]);
+    assert_eq!(ids, [SourceId::Morizen]);
+    assert!(source(SourceId::Modrinth).is_none());
     assert!(source(SourceId::CurseForge).is_none());
 }

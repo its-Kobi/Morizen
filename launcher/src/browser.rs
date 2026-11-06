@@ -1,11 +1,5 @@
-//! The mod browser's sources: search Modrinth (CurseForge support is coming soon) for what
-//! Morizen loads, say how well each result runs, and download a file only after its checksum
-//! matches (docs/mod-browser.md).
-//!
-//! Offered: Java mods (Fabric, NeoForge, Forge), whose content Morizen ports and whose jar is
-//! checked before install ([`java`]), modpacks (imported and ported), resource packs
-//! (`resourcepacks/`) and data packs (into a world, [`installed::install_datapack`]). Java code
-//! itself doesn't run in Morizen (docs/mods.md).
+//! The mod browser installs projects from Horizon's reviewed registry, the same catalogue shown
+//! at <https://playhorizon.dev/mods>. Every file is checked before it reaches the game folder.
 pub mod curseforge;
 pub mod details;
 pub mod download;
@@ -85,7 +79,7 @@ impl SourceId {
         match self {
             SourceId::Modrinth => "Modrinth",
             SourceId::CurseForge => "CurseForge",
-            SourceId::Morizen => "Morizen",
+            SourceId::Morizen => "Official Horizon",
             SourceId::Local => "this computer",
         }
     }
@@ -274,11 +268,9 @@ pub const CURSEFORGE_SOON: &str = "CurseForge support is coming soon.";
 pub const SHADERS_ON_HORIZON: &str =
     "Morizen's shader packs are on Morizen's registry: pick Morizen.";
 
-/// The sources this launcher uses: Modrinth and Morizen's registry. CurseForge support is coming
-/// soon: its API needs a paid key, so no search or install goes to it; `curseforge` is kept for
-/// then.
+/// The only remote catalogue this launcher offers: Horizon's reviewed official registry.
 pub fn sources() -> Vec<Box<dyn Source>> {
-    vec![Box::new(modrinth::Modrinth), Box::new(horizon::Registry)]
+    vec![Box::new(horizon::Registry)]
 }
 
 /// The source of that id, when this launcher can use it.

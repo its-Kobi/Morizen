@@ -9,14 +9,16 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
-/// The upstream engine repository, kept for its pre-signing release pins
-/// (`crates/horizon-release-sign/legacy-releases.txt`).
+/// The upstream engine repository: where the game builds come from. Its releases use the same
+/// asset names and signing key as this fork always accepted, and its pre-signing release pins are
+/// in `crates/horizon-release-sign/legacy-releases.txt`.
 pub const REPO: &str = "horizon-rust/horizon";
-/// This fork's repository. Game builds, their signed checksums, native-mod sources and launcher
-/// self-updates all come from here, so no upstream Horizon update can replace a Morizen install.
-pub const GAME_REPO: &str = "its-Kobi/Morizen";
-/// Morizen's launcher releases live beside the game's.
-pub const LAUNCHER_REPO: &str = GAME_REPO;
+/// The game builds players install: upstream Horizon's own signed releases. This fork no longer
+/// publishes game builds of its own; the launcher only chooses and installs them.
+pub const GAME_REPO: &str = "horizon-rust/horizon";
+/// This fork's repository: the launcher players download, and the only source of launcher
+/// self-updates. It never offers an upstream launcher instead.
+pub const LAUNCHER_REPO: &str = "its-Kobi/Morizen";
 pub const README_URL: &str = "https://github.com/its-Kobi/Morizen/blob/main/launcher/README.md";
 /// The players' page on connecting an AI agent (the website's docs/agents.md).
 pub const AGENT_DOCS_URL: &str = "https://playhorizon.dev/docs/agents";
@@ -145,6 +147,38 @@ pub const GAME_TAG_PREFIX: &str = "game-v";
 /// The launcher release players download: one release, its archive replaced as launcher builds
 /// come out, so there is always one tag to point people at.
 pub const LAUNCHER_RELEASE_TAG: &str = "release-launcher";
+
+/// The commit this launcher was built from (`HORIZON_LAUNCHER_BUILD`, set by the launcher
+/// workflow). A fixed tag can't say which build it holds, so its notes carry this marker and
+/// self-update compares them. Empty in a build made from source.
+pub const LAUNCHER_BUILD: &str = match option_env!("HORIZON_LAUNCHER_BUILD") {
+    Some(build) => build,
+    None => "",
+};
+
+/// The marker the launcher release's notes carry, hidden in a comment:
+/// `<!-- morizen-build: 0123abc -->`.
+const LAUNCHER_BUILD_MARKER: &str = "morizen-build:";
+
+/// The build identifier in a release's notes, when it has one.
+fn release_build(body: &str) -> Option<&str> {
+    let rest = body.split(LAUNCHER_BUILD_MARKER).nth(1)?.trim_start();
+    let end = rest
+        .find(|c: char| c.is_whitespace() || c == '-')
+        .unwrap_or(rest.len());
+    (end > 0).then(|| &rest[..end])
+}
+
+/// What a launcher update is called: its version, or `build 0123abc` for the fixed release.
+pub fn launcher_label(release: &Release) -> String {
+    if let Some(version) = launcher_version(&release.tag) {
+        return version.to_string();
+    }
+    release_build(&release.body).map_or_else(
+        || release.tag.clone(),
+        |build| format!("build {}", build.get(..7).unwrap_or(build)),
+    )
+}
 
 /// The launcher version in a `launcher@X.Y.Z` (or `launcher-vX.Y.Z`) tag, or None for any other tag.
 pub fn launcher_version(tag: &str) -> Option<&str> {
@@ -276,16 +310,25 @@ fn release_list_in(repo: &str) -> Result<serde_json::Value, String> {
     get(&url)?.into_json().map_err(|e| e.to_string())
 }
 
-/// Morizen's game releases. This used to be Horizon's list; pointing it at Morizen stops an
-/// upstream build from being offered as an update to a fork that adds Java mod support.
+/// The game builds: upstream Horizon's releases, the ones its own launcher installs.
 fn release_list() -> Result<serde_json::Value, String> {
     release_list_in(GAME_REPO)
 }
 
-/// Morizen's own launcher releases. A missing/private repository or no launcher release simply
+/// This fork's launcher releases. A missing/private repository or no launcher release simply
 /// means there is no self-update; it must never fall back to Horizon's launcher releases.
 fn launcher_release_list() -> Result<serde_json::Value, String> {
     release_list_in(LAUNCHER_REPO)
+}
+
+/// Whether a release asset is the archive `wanted` names. Morizen's launcher release calls its
+/// archive `morizen-launcher-<platform>` where upstream calls it `horizon-launcher-<platform>`;
+/// either name is the same build for the launcher.
+fn asset_matches(name: &str, wanted: &str) -> bool {
+    name == wanted
+        || wanted
+            .strip_prefix("horizon-launcher-")
+            .is_some_and(|rest| name.strip_prefix("morizen-launcher-") == Some(rest))
 }
 
 /// The releases in `list` whose tag passes `keep`, newest first, with the asset named `asset`.
@@ -301,12 +344,14 @@ pub(crate) fn parse_releases(
             continue;
         }
         let found = r["assets"].as_array().into_iter().flatten().find_map(|a| {
-            (Some(a["name"].as_str()?) == asset).then(|| {
-                Some((
-                    a["browser_download_url"].as_str()?.to_string(),
-                    a["size"].as_u64()?,
-                ))
-            })?
+            let name = a["name"].as_str()?;
+            if !asset.is_some_and(|wanted| asset_matches(name, wanted)) {
+                return None;
+            }
+            Some((
+                a["browser_download_url"].as_str()?.to_string(),
+                a["size"].as_u64()?,
+            ))
         });
         out.push(Release {
             tag: tag.into(),
@@ -331,7 +376,7 @@ fn is_launcher_tag(tag: &str) -> bool {
     launcher_version(tag).is_some()
 }
 
-/// Published Morizen builds, newest first: the current Nightly (the only build Morizen ships since
+/// Published upstream Horizon builds, newest first: the current Nightly (the only build Horizon ships since
 /// 2026-10-28, docs/release-flow.md), the last week's Nightlies, then the releases from before.
 /// Drafts never reach the anonymous API, and launcher releases are left out.
 pub fn releases() -> Result<Vec<Release>, String> {
@@ -371,7 +416,17 @@ fn launcher_releases_in_with(
     list: &serde_json::Value,
     json: impl Fn(String) -> Result<serde_json::Value, String>,
 ) -> Vec<Release> {
-    let found = parse_releases(list, LAUNCHER_ASSET, is_launcher_tag);
+    let found = parse_releases(list, LAUNCHER_ASSET, |tag| {
+        is_launcher_tag(tag) || tag == LAUNCHER_RELEASE_TAG
+    });
+    // The fixed release is the one players are pointed at, and its archive is always the newest
+    // launcher: when it is there, it is the only launcher release offered.
+    if let Some(fixed) = found
+        .iter()
+        .find(|r| r.tag == LAUNCHER_RELEASE_TAG && r.asset.is_some())
+    {
+        return vec![fixed.clone()];
+    }
     if found.iter().any(|r| r.asset.is_some()) {
         return found;
     }
@@ -414,7 +469,7 @@ fn newest_launcher_tags(refs: &serde_json::Value) -> Vec<String> {
     tags
 }
 
-/// The newest Morizen release that has a build for this platform.
+/// The newest upstream Horizon release that has a build for this platform.
 pub fn latest(releases: &[Release]) -> Option<&Release> {
     releases.iter().find(|r| r.asset.is_some())
 }
@@ -470,7 +525,7 @@ impl Links {
 
 /// The links from main, or the built-in ones when offline.
 pub fn links() -> Links {
-    let url = format!("https://raw.githubusercontent.com/{GAME_REPO}/main/launcher/links.json");
+    let url = format!("https://raw.githubusercontent.com/{LAUNCHER_REPO}/main/launcher/links.json");
     get(&url)
         .ok()
         .and_then(|r| r.into_string().ok())
@@ -573,7 +628,7 @@ fn signed_digest(tag: &str, asset: &str) -> Result<String, String> {
 }
 
 /// The SHA-256 from a Morizen launcher release. The repository is explicit so self-update can
-/// never follow Horizon even though game updates intentionally still do.
+/// never follow Horizon even though game updates intentionally do.
 fn launcher_signed_digest(tag: &str, asset: &str) -> Result<String, String> {
     crate::signed::digest_in(
         LAUNCHER_REPO,
@@ -650,7 +705,7 @@ pub fn install(release: &Release, progress: impl Fn(f32)) -> Result<(), String> 
             fetch_small,
         )?,
         None if is_game_tag(tag) => signed_digest(tag, ASSET.unwrap_or_default())?,
-        None => return Err(format!("{tag} is not a Morizen release.")),
+        None => return Err(format!("{tag} is not a Horizon game release.")),
     };
     install_as(release, tag, &sha256, progress)
 }
@@ -2277,7 +2332,7 @@ pub fn release_notes(tag: Option<&str>) -> Result<Release, String> {
         Some(tag) => releases
             .into_iter()
             .find(|r| r.tag == tag)
-            .ok_or_else(|| format!("No Morizen release is tagged {tag}.")),
+            .ok_or_else(|| format!("No Horizon game release is tagged {tag}.")),
         None => releases
             .into_iter()
             .next()
@@ -2381,17 +2436,30 @@ pub fn launcher_update(releases: &[Release]) -> Option<Release> {
 }
 
 fn launcher_update_from(releases: &[Release], own: &str) -> Option<Release> {
-    releases
-        .iter()
-        .find(|r| r.asset.is_some())
-        .filter(|r| compare_versions(&r.tag, own).is_gt())
-        .cloned()
+    launcher_update_from_build(releases, own, LAUNCHER_BUILD)
 }
 
-/// Load Morizen's game releases, then independently look for a launcher release in the same
-/// repository. Publish the game releases first, so the separate launcher request cannot hold up
-/// the release pages or opening animation. A missing launcher repository means no self-update;
-/// it never falls back to an upstream Horizon launcher.
+/// [`launcher_update_from`] against an explicit build id. A fixed `release-launcher` tag has no
+/// version to compare, so its notes' build marker decides; a build from source (no id) is never
+/// offered the fixed release, and a versioned release still compares by version.
+fn launcher_update_from_build(releases: &[Release], own: &str, build: &str) -> Option<Release> {
+    let newest = releases.iter().find(|r| r.asset.is_some())?;
+    if newest.tag == LAUNCHER_RELEASE_TAG {
+        if build.is_empty() {
+            return None;
+        }
+        let their_build = release_build(&newest.body)?;
+        return (their_build != build).then(|| newest.clone());
+    }
+    compare_versions(&newest.tag, own)
+        .is_gt()
+        .then(|| newest.clone())
+}
+
+/// Load upstream Horizon's game releases, then independently look for this fork's launcher
+/// release. Publish the game releases first, so the separate launcher request cannot hold up the
+/// release pages or opening animation. A missing launcher repository means no self-update; it
+/// never falls back to an upstream Horizon launcher.
 pub fn releases_and_updates(
     on_releases: impl FnOnce(Result<Vec<Release>, String>),
 ) -> Result<Updates, String> {
@@ -2462,7 +2530,7 @@ pub fn install_tag(tag: &str, as_update: bool, progress: impl Fn(f32)) -> Result
         releases
             .iter()
             .find(|r| r.tag == tag)
-            .ok_or_else(|| format!("No Morizen release is tagged {tag}."))?
+            .ok_or_else(|| format!("No Horizon game release is tagged {tag}."))?
     };
     if release.asset.is_none() {
         return Err(format!("{} has no build for this platform.", release.tag));
@@ -2654,7 +2722,8 @@ pub fn self_update(release: &Release, progress: impl Fn(f32)) -> Result<(), Stri
         progress(1.0);
         return Ok(());
     }
-    let sha256 = launcher_signed_digest(&release.tag, LAUNCHER_ASSET.unwrap_or_default())?;
+    let asset = url.rsplit('/').next().unwrap_or_default();
+    let sha256 = launcher_signed_digest(&release.tag, asset)?;
     let work = data_dir().join(".launcher-update");
     let _ = fs::remove_dir_all(&work);
     fs::create_dir_all(&work).map_err(|e| e.to_string())?;
@@ -3451,15 +3520,13 @@ mod tests {
         assert_eq!(launcher, ["launcher-v9.0.0"]);
     }
 
-    /// Rolling a release back (`gh release edit <tag> --draft`, docs/release-flow.md) makes the
-    /// previous one the newest again: it is what `install latest` and the update check offer.
-    /// Morizen's repository is the only source of game builds: an upstream Horizon release list
-    /// is no longer read, and Morizen's non-game `Release` tag is not mistaken for one.
+    /// Game builds come only from upstream Horizon; launcher updates stay in this fork.
     #[test]
-    fn only_morizen_publishes_game_builds() {
-        assert_eq!(GAME_REPO, "its-Kobi/Morizen");
-        assert_eq!(LAUNCHER_REPO, GAME_REPO);
-        assert_ne!(GAME_REPO, REPO);
+    fn upstream_publishes_games_and_morizen_publishes_the_launcher() {
+        assert_eq!(GAME_REPO, "horizon-rust/horizon");
+        assert_eq!(GAME_REPO, REPO);
+        assert_eq!(LAUNCHER_REPO, "its-Kobi/Morizen");
+        assert_ne!(GAME_REPO, LAUNCHER_REPO);
         let list = serde_json::json!([
             {
                 "tag_name": "Release",
@@ -3681,6 +3748,54 @@ mod tests {
             own_tag_of(None, None),
             format!("launcher@{}", env!("CARGO_PKG_VERSION"))
         );
+    }
+
+    #[test]
+    fn the_fixed_launcher_release_updates_by_build_id() {
+        let release = Release {
+            tag: LAUNCHER_RELEASE_TAG.into(),
+            name: String::new(),
+            body: "<!-- morizen-build: abcdef123456 -->".into(),
+            date: String::new(),
+            asset: Some((
+                "https://example.test/morizen-launcher-windows-x64.zip".into(),
+                1,
+            )),
+            prerelease: false,
+            nightly: None,
+        };
+        assert_eq!(release_build(&release.body), Some("abcdef123456"));
+        assert_eq!(launcher_label(&release), "build abcdef1");
+        assert!(launcher_update_from_build(
+            std::slice::from_ref(&release),
+            "launcher@0.2.0",
+            "abcdef123456"
+        )
+        .is_none());
+        assert!(launcher_update_from_build(
+            std::slice::from_ref(&release),
+            "launcher@0.2.0",
+            "0123456789ab"
+        )
+        .is_some());
+        assert!(launcher_update_from_build(&[release], "launcher@0.2.0", "").is_none());
+
+        if let Some(asset) = LAUNCHER_ASSET {
+            let archive = asset.replacen("horizon-launcher-", "morizen-launcher-", 1);
+            let list = serde_json::json!([{
+                "tag_name": LAUNCHER_RELEASE_TAG,
+                "body": "<!-- morizen-build: abcdef123456 -->",
+                "assets": [{
+                    "name": archive,
+                    "browser_download_url": "https://example.test/launcher.zip",
+                    "size": 1
+                }]
+            }]);
+            let found = launcher_releases_in_with(&list, |_| panic!("no fallback needed"));
+            assert_eq!(found.len(), 1);
+            assert_eq!(found[0].tag, LAUNCHER_RELEASE_TAG);
+            assert!(found[0].asset.is_some());
+        }
     }
 
     /// The update path to 0.2 (docs/versioning.md): launchers from before it take the last

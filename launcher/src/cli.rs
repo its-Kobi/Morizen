@@ -542,7 +542,7 @@ enum ModsCmd {
         /// Also what was made for other versions or runs only partly, each marked
         #[arg(long)]
         everything: bool,
-        #[arg(long, value_enum, default_value_t = SourceArg::Modrinth)]
+        #[arg(long, value_enum, default_value_t = SourceArg::Morizen)]
         source: SourceArg,
         /// The instance (default: the selected one)
         #[arg(long)]
@@ -555,7 +555,7 @@ enum ModsCmd {
         /// Allow a version made for another Minecraft version (1.21 and later)
         #[arg(long)]
         everything: bool,
-        #[arg(long, value_enum, default_value_t = SourceArg::Modrinth)]
+        #[arg(long, value_enum, default_value_t = SourceArg::Morizen)]
         source: SourceArg,
     },
     /// Install a pack and what it needs into an instance, by its id or slug (checksums
@@ -573,7 +573,7 @@ enum ModsCmd {
         /// Allow a version made for another Minecraft version
         #[arg(long)]
         everything: bool,
-        #[arg(long, value_enum, default_value_t = SourceArg::Modrinth)]
+        #[arg(long, value_enum, default_value_t = SourceArg::Morizen)]
         source: SourceArg,
     },
     /// Update what the browser installed (or one pack)
@@ -624,10 +624,7 @@ enum KindArg {
 
 #[derive(Clone, Copy, clap::ValueEnum)]
 enum SourceArg {
-    Modrinth,
-    /// CurseForge support is coming soon
-    Curseforge,
-    /// Morizen's own registry: mods, modpacks and resource packs made for Morizen, reviewed
+    /// Horizon's reviewed registry: the catalogue at playhorizon.dev/mods
     Morizen,
 }
 
@@ -635,11 +632,10 @@ impl SourceArg {
     fn get(self) -> Result<Box<dyn horizon_launcher::browser::Source>, String> {
         use horizon_launcher::browser::{self, SourceId};
         let id = match self {
-            SourceArg::Modrinth => SourceId::Modrinth,
-            SourceArg::Curseforge => SourceId::CurseForge,
             SourceArg::Morizen => SourceId::Morizen,
         };
-        browser::source(id).ok_or_else(|| browser::CURSEFORGE_SOON.into())
+        browser::source(id)
+            .ok_or_else(|| "The official Horizon mod registry is unavailable.".into())
     }
 }
 
@@ -1575,24 +1571,24 @@ fn update(check: bool, as_json: bool) -> Result<(), String> {
     if as_json && check {
         json(serde_json::json!({
             "horizon": updates.horizon.as_ref().map(|r| &r.tag),
-            "launcher": updates.launcher.as_ref().and_then(|r| backend::launcher_version(&r.tag)),
+            "launcher": updates.launcher.as_ref().map(backend::launcher_label),
             "launcher_current": backend::VERSION,
         }));
         return Ok(());
     }
     match &updates.horizon {
-        None => println!("Morizen: up to date."),
-        Some(r) if check => println!("Morizen: {} is available.", r.tag),
+        None => println!("Game: up to date."),
+        Some(r) if check => println!("Game: {} is available.", r.tag),
         Some(r) => {
             let tag =
                 backend::install_tag(&r.tag, true, progress(format!("Installing {}", r.tag)))?;
-            println!("Morizen: installed {tag}.");
+            println!("Game: installed {tag}.");
         }
     }
     match &updates.launcher {
         None => println!("Launcher: {} is up to date.", backend::VERSION),
         Some(r) => {
-            let version = backend::launcher_version(&r.tag).unwrap_or_default();
+            let version = backend::launcher_label(r);
             if check {
                 println!(
                     "Launcher: {version} is available (this is {}).",
