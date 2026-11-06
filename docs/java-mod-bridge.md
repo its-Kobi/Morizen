@@ -637,17 +637,26 @@ unchanged:
   `java-mods` feature ignores it.
 
 The `java mod bridge` workflow (`.github/workflows/java-mod-bridge.yml`) builds on Windows. It
-uploads a launcher-only artifact, `morizen-launcher-windows-x64`, and publishes the game as a
-signed release of `its-Kobi/Morizen` (`v<date>.<run>`, asset `horizon-windows-x64.zip`). The
-launcher downloads that release from its Versions page, so the game is never bundled in the
-launcher artifact. Releases are signed with Morizen's own key in
-`crates/horizon-release-sign/release-keys.txt`; the private key is the repository's
-`RELEASE_SIGNING_KEY` secret. No generated shim, bridge jar or Mojang file is uploaded.
+publishes two kinds of release on `its-Kobi/Morizen`, which the workflow documents and are the
+repository's convention:
+
+- **`release-launcher`** — the launcher players download by hand. One release whose archive,
+  `morizen-launcher-windows-x64.zip`, is replaced by every launcher build, so this tag always
+  points at the newest launcher. It is the release GitHub marks as latest.
+- **`game-v<date>.<run>`** — the game build, asset `horizon-windows-x64.zip`, signed with
+  `SHA256SUMS`/`SHA256SUMS.sig`. It is never installed by hand: the launcher downloads and
+  verifies it from its Versions page, so the game is not bundled in the launcher.
+
+Older releases used a bare `v<date>.<run>` tag; `is_game_tag` still accepts that form. Releases
+are signed with Morizen's own key in `crates/horizon-release-sign/release-keys.txt`; the private
+key is the repository's `RELEASE_SIGNING_KEY` secret. No generated shim, bridge jar or Mojang
+file is uploaded.
 
 To test on your own machine:
 
-1. Unpack the launcher artifact, start `horizon-launcher.exe`, install the newest Morizen build
-   on Versions, and start it once so its resources are prepared.
+1. Download and unpack the **`release-launcher`** release (`morizen-launcher-windows-x64.zip`),
+   start `horizon-launcher.exe`, install the newest Morizen build on Versions, and start it once
+   so its resources are prepared.
 2. `py -3 tools/java_mod_bridge.py game-config --minecraft-jar <your 26.3 jar> --mods <jar or
    folder>` builds the bridge jars from your own jar with a JDK and writes
    `.local/java-mod-bridge/in-game/config.json`. Everything stays under `.local/`.

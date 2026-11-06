@@ -131,11 +131,20 @@ pub(crate) fn get(url: &str) -> Result<ureq::Response, String> {
     })
 }
 
-/// A Morizen game tag: `v` then a digit (`v2026.10.13`). Launcher tags never match.
+/// A Morizen game tag: `game-v` then a digit (`game-v2026.10.13`), or the `v` form releases had
+/// before the game and launcher got their own tags. Launcher tags never match.
 pub fn is_game_tag(tag: &str) -> bool {
-    tag.strip_prefix('v')
+    tag.strip_prefix(GAME_TAG_PREFIX)
+        .or_else(|| tag.strip_prefix('v'))
         .is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_digit()))
 }
+
+/// What a game tag starts with: `game-v2026.11.06.11`. [`is_game_tag`] also takes the older `v…`.
+pub const GAME_TAG_PREFIX: &str = "game-v";
+
+/// The launcher release players download: one release, its archive replaced as launcher builds
+/// come out, so there is always one tag to point people at.
+pub const LAUNCHER_RELEASE_TAG: &str = "release-launcher";
 
 /// The launcher version in a `launcher@X.Y.Z` (or `launcher-vX.Y.Z`) tag, or None for any other tag.
 pub fn launcher_version(tag: &str) -> Option<&str> {
@@ -199,12 +208,14 @@ pub fn release_order(tag: &str) -> ReleaseOrder {
     }
     let semver = tag
         .strip_prefix(LAUNCHER_TAG_PREFIX)
+        .or_else(|| tag.strip_prefix(GAME_TAG_PREFIX))
         .or_else(|| tag.strip_prefix('v'))
         .and_then(semver_order);
     semver.unwrap_or_else(|| {
         let v = tag
             .strip_prefix(OLD_LAUNCHER_TAG_PREFIX)
             .or_else(|| tag.strip_prefix(LAUNCHER_TAG_PREFIX))
+            .or_else(|| tag.strip_prefix(GAME_TAG_PREFIX))
             .unwrap_or(tag);
         let v = v.strip_prefix('v').unwrap_or(v);
         let mut parts: Vec<u64> = v
@@ -3405,6 +3416,14 @@ mod tests {
     #[test]
     fn tags_never_mix() {
         assert!(is_game_tag("v2026.10.13"));
+        assert!(is_game_tag("game-v2026.10.13.4"));
+        assert!(is_game_tag("game-v0.2.0"));
+        assert!(!is_game_tag("game-vnext"));
+        assert!(!is_game_tag(LAUNCHER_RELEASE_TAG));
+        assert_eq!(
+            compare_versions("game-v2026.11.06.11", "game-v2026.11.06.9"),
+            Greater
+        );
         assert!(!is_game_tag("launcher-v0.2.0"));
         assert!(!is_game_tag("vnext"));
         assert_eq!(launcher_version("launcher-v0.2.0"), Some("0.2.0"));

@@ -79,10 +79,13 @@ jobs:
           Morizen: Windows launcher with the Java mod bridge
           ==================================================
 
-          This is the launcher only, not a release. It installs the latest signed Morizen game
-          build (the one made by the same workflow run) from its Versions page, and that game
-          runs real Fabric and Quilt mods in an embedded JVM (JAVA-MODS.md). Forge and NeoForge
-          are not supported for 26.3. The bridge is off in ordinary builds.
+          This is the launcher only. It installs the newest signed Morizen game build from the
+          Morizen releases (its Versions page), and that game runs real Fabric and Quilt mods in
+          an embedded JVM (JAVA-MODS.md). Forge and NeoForge are not supported for 26.3. The
+          bridge is off in ordinary builds.
+
+          Always take the launcher from the release tagged release-launcher. The game releases
+          (game-v...) are not for installing by hand: the launcher downloads them.
 
           What is here
             horizon-launcher.exe   the launcher (Settings > Game > Java mods config)
@@ -93,7 +96,9 @@ jobs:
             1. Install Java 25 (a JDK) and have your own Minecraft 26.3 client jar.
             2. Start horizon-launcher.exe and install the newest Morizen build on Versions,
                then start it once so the launcher prepares its resources.
-            3. Build the bridge from your own jar and write its config (Java only, not Rust):
+            3. Make a Minecraft: Java Edition instance (New instance > Game > Minecraft Java,
+               pick a version and Fabric or Quilt) to play Java mods the ordinary way, or build
+               the bridge from your own jar and write its config (Java only, not Rust):
                  py -3 tools\java_mod_bridge.py game-config --minecraft-jar "C:\path\to\26.3.jar" --mods .local\java-mod-bridge\build\morizen-registry-test-mod.jar
                Everything it generates stays under .local\, including
                .local\java-mod-bridge\in-game\config.json. Point --mods at your own jar or mods
@@ -126,8 +131,9 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   publish:
-    # Main only: a signed release the launcher can install. The private key exists only as the
-    # repository secret; this job signs the archive the build job made and never runs it.
+    # Main only: the signed game build the launcher installs, and the launcher release players
+    # download (tag `release-launcher`, replaced every time). The private key exists only as the
+    # repository secret; this job signs the archives the build job made and never runs them.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: windows
     runs-on: ubuntu-latest
@@ -139,19 +145,73 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: morizen-game-windows-x64
-          path: dist
+          path: dist/game
+      - uses: actions/download-artifact@v4
+        with:
+          name: morizen-launcher-windows-x64
+          path: dist/launcher
+      - name: Zip the launcher
+        run: |
+          cd dist/launcher
+          zip -qr ../morizen-launcher-windows-x64.zip .
       - name: Sign the checksums
         env:
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
         run: |
-          tag="v$(date -u +%Y.%m.%d).${GITHUB_RUN_NUMBER}"
-          bash tools/ci/sign_release.sh "$tag" dist/horizon-windows-x64.zip
+          tag="game-v$(date -u +%Y.%m.%d).${GITHUB_RUN_NUMBER}"
+          bash tools/ci/sign_release.sh "$tag" dist/game/horizon-windows-x64.zip
+          bash tools/ci/sign_release.sh release-launcher dist/morizen-launcher-windows-x64.zip
           echo "TAG=$tag" >> "$GITHUB_ENV"
-      - name: Publish the release
+      - name: Publish the game build
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          cat > "$RUNNER_TEMP/game-notes.md" <<'EOF'
+          **This is the game, not the launcher: do not install it by hand.** The Morizen launcher
+          downloads this archive itself, from its Versions page, and checks it against the signed
+          `SHA256SUMS` below.
+
+          Windows build with the opt-in Java mod bridge (JAVA-MODS.md in the launcher). The
+          launcher you download by hand is the release tagged **release-launcher**.
+          EOF
           gh release create "$TAG" \
-            dist/horizon-windows-x64.zip dist/SHA256SUMS dist/SHA256SUMS.sig \
-            --title "Morizen java-mods ${TAG#v}" \
-            --notes "Windows build with the opt-in Java mod bridge (docs/java-mod-bridge.md). Signed game archive for the Morizen launcher."
+            dist/game/horizon-windows-x64.zip dist/game/SHA256SUMS dist/game/SHA256SUMS.sig \
+            --title "Morizen game ${TAG#game-}" \
+            --notes-file "$RUNNER_TEMP/game-notes.md" \
+            --latest=false
+      - name: Publish the launcher
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > "$RUNNER_TEMP/launcher-notes.md" <<'EOF'
+          # **This is the one you install.**
+
+          Download **morizen-launcher-windows-x64.zip** here, unpack it and start
+          `horizon-launcher.exe`. It is the whole launcher; the game is not inside it.
+
+          **Do not install any of the other releases.** They are tagged `game-v…` because they are
+          the game builds, and the launcher downloads the newest of them for you. Nothing else on
+          this page is meant to be downloaded by hand, except the launcher here.
+
+          What it does
+          - installs the newest signed Morizen game build from this repository's releases;
+          - makes Minecraft: Java Edition instances (choose Fabric or Quilt, then install mods from
+            the Mods page or by dropping a `.jar` on the window);
+          - runs the Java mod bridge inside the Morizen game (JAVA-MODS.md), off in ordinary builds.
+
+          The archive is replaced by every launcher build from `main`; this tag always points at
+          the newest one. `SHA256SUMS` and `SHA256SUMS.sig` are beside it, signed with Morizen's
+          release key.
+          EOF
+          if gh release view release-launcher > /dev/null 2>&1; then
+            gh release edit release-launcher \
+              --title "Morizen launcher — install this one" \
+              --notes-file "$RUNNER_TEMP/launcher-notes.md" --latest
+          else
+            gh release create release-launcher \
+              --title "Morizen launcher — install this one" \
+              --notes-file "$RUNNER_TEMP/launcher-notes.md" --latest
+          fi
+          gh release upload release-launcher \
+            dist/morizen-launcher-windows-x64.zip \
+            dist/SHA256SUMS dist/SHA256SUMS.sig --clobber
