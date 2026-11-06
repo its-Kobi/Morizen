@@ -56,7 +56,7 @@ pub(super) struct InstanceDialog {
     /// `loader` is set, and the Mods page installs that instance's mods. Its version is the
     /// `Field::InstanceMinecraft` text field.
     java: bool,
-    loader: Option<JavaLoader>,
+    loader: JavaLoader,
 }
 
 /// The loader a Java instance plays with, as the dialog's three-way choice (`loaders::Kind` has
