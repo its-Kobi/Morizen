@@ -133,6 +133,7 @@ pub use horizon_client_input::key_names;
 pub use horizon_client_input::keybinds;
 pub use horizon_client_input::keymapping;
 pub use horizon_client_input::mouse;
+pub use horizon_client_input::touch;
 pub use horizon_client_input::window;
 pub use horizon_command as command;
 pub use horizon_items::blocks;

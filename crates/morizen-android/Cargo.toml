@@ -1,0 +1,76 @@
+[package]
+name = "morizen-android"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version = "1.90"
+description = "Morizen's native Android application"
+
+[lib]
+crate-type = ["cdylib"]
+
+[features]
+default = ["touch-controls"]
+touch-controls = []
+audio = []
+controllers = []
+java-mods = []
+
+[dependencies]
+horizon-assets = { path = "../horizon-assets" }
+horizon-client = { path = "../horizon-client", default-features = false }
+horizon-core = { path = "../horizon-core" }
+horizon-friends = { path = "../horizon-friends" }
+horizon-items = { path = "../horizon-items" }
+horizon-mods = { path = "../horizon-mods", default-features = false, features = ["index"] }
+horizon-protocol = { path = "../horizon-protocol" }
+horizon-shader-api = { path = "../horizon-shader-api" }
+horizon-shaders = { path = "../horizon-shaders" }
+horizon-threads = { path = "../horizon-threads" }
+horizon-world = { path = "../horizon-world" }
+chrono = { version = "0.4.42", default-features = false, features = ["clock", "std"] }
+glam = "0.30"
+log = "0.4"
+serde_json = "1.0.151"
+wgpu = { version = "30.0.1", default-features = false, features = ["std", "parking_lot", "vulkan", "gles", "wgsl", "naga-ir"] }
+winit = { version = "0.30.13", default-features = false, features = ["rwh_06", "android-native-activity"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+android_logger = "0.15"
+
+[package.metadata.android]
+package = "dev.morizen.mobile"
+build_targets = ["aarch64-linux-android"]
+apk_name = "morizen-android-arm64"
+strip = "strip"
+
+[package.metadata.android.sdk]
+min_sdk_version = 29
+target_sdk_version = 35
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.INTERNET"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.ACCESS_NETWORK_STATE"
+
+[[package.metadata.android.uses_feature]]
+name = "android.hardware.touchscreen"
+required = true
+
+[[package.metadata.android.uses_feature]]
+name = "android.hardware.vulkan.level"
+required = true
+version = 1
+
+[package.metadata.android.application]
+label = "Morizen"
+theme = "@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen"
+
+[package.metadata.android.application.activity]
+orientation = "landscape"
+resizeable_activity = false
+exported = true
+
+[lints]
+workspace = true

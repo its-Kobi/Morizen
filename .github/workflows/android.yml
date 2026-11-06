@@ -1,0 +1,46 @@
+name: Android foundation
+
+# Builds the native APK as the mobile port is developed. It is deliberately an Actions artifact,
+# not a release asset, until resource preparation and the mobile launcher screen are complete.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/morizen-android/**'
+      - 'crates/horizon-client-input/**'
+      - 'crates/horizon-client/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: morizen-android-arm64
+      - name: Check formatting
+        run: cargo fmt --check -p horizon-client-input -p horizon-client -p morizen-android
+      - name: Test the touch layout and multi-touch state
+        run: cargo test --locked -p horizon-client-input touch::tests
+      - name: Install the Rust APK packager
+        run: cargo install cargo-apk --version 0.10.0 --locked
+      - name: Build the arm64 APK
+        run: cargo apk build --manifest-path crates/morizen-android/Cargo.toml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: morizen-android-arm64-foundation
+          path: target/debug/apk/*.apk
+          if-no-files-found: error
+          retention-days: 14

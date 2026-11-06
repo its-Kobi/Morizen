@@ -281,6 +281,27 @@ use winit::{
     window::{CursorGrabMode, Window, WindowId},
 };
 
+#[cfg(target_os = "android")]
+static ANDROID_APP: std::sync::Mutex<Option<winit::platform::android::activity::AndroidApp>> =
+    std::sync::Mutex::new(None);
+
+/// The event loop for this platform. Android's NativeActivity gives Winit the app handle through
+/// `android_main`; desktop platforms create their event loop directly.
+fn event_loop() -> std::result::Result<EventLoop<()>, EventLoopError> {
+    #[cfg(target_os = "android")]
+    {
+        use winit::platform::android::EventLoopBuilderExtAndroid;
+        let app = ANDROID_APP
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("android_main did not provide AndroidApp");
+        return EventLoop::builder().with_android_app(app).build();
+    }
+    #[cfg(not(target_os = "android"))]
+    EventLoop::new()
+}
+
 #[derive(Clone)]
 struct Options {
     resources: PathBuf,
@@ -15538,7 +15559,7 @@ fn leave_fullscreen_after(
 }
 
 fn run_event_loop(mut game: Game<'_>) -> Result<()> {
-    let result = EventLoop::new()?.run_app(&mut game);
+    let result = event_loop()?.run_app(&mut game);
     leave_fullscreen_after(&result, &mut game.settings);
     result?;
     horizon_client::discord_presence::stop();
@@ -15933,7 +15954,7 @@ fn run_loading(
         error: None,
     };
     let mut app = App::Loading(Box::new(loading));
-    let result = EventLoop::new()?.run_app(&mut app);
+    let result = event_loop()?.run_app(&mut app);
     match &mut app {
         App::Ready(game) => leave_fullscreen_after(&result, &mut game.settings),
         App::Loading(loading) => leave_fullscreen_after(&result, &mut loading.settings),
@@ -16060,6 +16081,14 @@ pub fn run() -> Result<()> {
         run_event_loop(game)?;
     }
     Ok(())
+}
+
+/// Android NativeActivity entry: keep its handle where both startup paths can build Winit's one
+/// event loop, then run the same game as desktop.
+#[cfg(target_os = "android")]
+pub fn run_android(app: winit::platform::android::activity::AndroidApp) -> Result<()> {
+    *ANDROID_APP.lock().unwrap() = Some(app);
+    run()
 }
 
 /// The right and left arms of a player model layer (`PlayerModel.rightArm`
