@@ -5,11 +5,13 @@
 //! prepare that directory before entering the game; until then the missing-resources error is
 //! deliberately logged instead of bundling Mojang files in the APK.
 
-#[path = "../../horizon-client/src/game/android_module.rs"]
-mod game;
+pub mod manifest;
+pub mod sandbox;
 
+#[cfg(target_os = "android")]
 use winit::platform::android::activity::AndroidApp;
 
+#[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
 fn android_main(app: AndroidApp) {
     android_logger::init_once(
@@ -28,7 +30,7 @@ fn android_main(app: AndroidApp) {
         log::error!("Could not open Morizen's Android data folder: {error}");
         return;
     }
-    if let Err(error) = game::run_android(app) {
+    if let Err(error) = horizon_client::game::run_android(app) {
         log::error!("Morizen Android stopped: {error}");
     }
 }

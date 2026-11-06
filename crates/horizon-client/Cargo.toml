@@ -90,6 +90,9 @@ winresource = "0.1"
 
 [features]
 default = ["audio", "controllers"]
+# Builds the desktop binary's private game module into the library for the Android cdylib. It is
+# never enabled by desktop builds; Android still runs exactly the same source files.
+android-game = []
 # Sound output. Without it (and `controllers`) the program links neither libasound nor libudev on
 # Linux: the server build (`--no-default-features`, released as horizon-engine; docs/server.md).
 audio = ["horizon-client-render/audio"]

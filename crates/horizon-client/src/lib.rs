@@ -1,10 +1,16 @@
 //! Horizon native client: resources, world streaming, rendering and the
 //! bindings between the validated simulation pieces and the game loop.
 #![forbid(unsafe_code)]
+
+#[cfg(feature = "android-game")]
+extern crate self as horizon_client;
+
 pub mod advancements;
 pub mod ambience;
 pub mod animate_tick;
 pub mod arrows;
+#[cfg(feature = "android-game")]
+pub mod game;
 pub use horizon_client_render::{
     assets, atlas_sources, audio, auth, bidi, biome, block_entities, block_entity_anim,
     block_entity_render, border_render, breaking, brewing, camera, chat, chunk, chunk_map, clouds,

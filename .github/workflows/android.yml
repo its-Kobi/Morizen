@@ -34,6 +34,8 @@ jobs:
         run: cargo fmt --check -p horizon-client-input -p horizon-client -p morizen-android
       - name: Test the touch layout and multi-touch state
         run: cargo test --locked -p horizon-client-input touch::tests
+      - name: Test the mobile manifest cache and native sandbox
+        run: cargo test --locked -p morizen-android --lib
       - name: Install the Rust APK packager
         run: cargo install cargo-apk --version 0.10.0 --locked
       - name: Build the arm64 APK

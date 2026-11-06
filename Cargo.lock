@@ -2307,23 +2307,15 @@ name = "morizen-android"
 version = "0.1.0"
 dependencies = [
  "android_logger",
- "chrono",
- "glam",
- "horizon-assets",
  "horizon-client",
- "horizon-core",
- "horizon-friends",
- "horizon-items",
- "horizon-mods",
  "horizon-protocol",
- "horizon-shader-api",
- "horizon-shaders",
- "horizon-threads",
- "horizon-world",
  "log",
+ "serde",
  "serde_json",
- "wgpu",
+ "sha1",
+ "ureq",
  "winit",
+ "zip",
 ]
 
 [[package]]
