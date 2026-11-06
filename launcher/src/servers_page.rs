@@ -36,6 +36,8 @@ pub(super) enum Field {
     /// The instance dialog's (`instances_page.rs`).
     InstanceName,
     InstanceGroup,
+    /// A Java instance's Minecraft version.
+    InstanceMinecraft,
     /// Home's Multiplayer section's (`multiplayer_page.rs`).
     ServerName,
     ServerAddress,
@@ -52,7 +54,7 @@ pub(super) enum Field {
 }
 
 impl Field {
-    const ALL: [Field; 20] = [
+    const ALL: [Field; 21] = [
         Field::Name,
         Field::Seed,
         Field::Players,
@@ -64,6 +66,7 @@ impl Field {
         Field::Email,
         Field::InstanceName,
         Field::InstanceGroup,
+        Field::InstanceMinecraft,
         Field::ServerName,
         Field::ServerAddress,
         Field::ConsoleSearch,

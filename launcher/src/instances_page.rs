@@ -4,6 +4,7 @@
 use super::*;
 use gpui::RenderImage;
 use horizon_launcher::instances::{self, Icon, Instance, Kind as InstanceKind};
+use horizon_launcher::{loaders, minecraft_versions};
 use servers_page::Field;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -51,6 +52,38 @@ pub(super) struct InstanceDialog {
     icon: Option<Icon>,
     error: Option<String>,
     busy: bool,
+    /// A Minecraft: Java Edition instance: it plays the real game, with Fabric or Quilt when
+    /// `loader` is set, and the Mods page installs that instance's mods. Its version is the
+    /// `Field::InstanceMinecraft` text field.
+    java: bool,
+    loader: Option<JavaLoader>,
+}
+
+/// The loader a Java instance plays with, as the dialog's three-way choice (`loaders::Kind` has
+/// only the two loaders, and a Java instance may run none).
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum JavaLoader {
+    None,
+    Fabric,
+    Quilt,
+}
+
+impl JavaLoader {
+    fn kind(self) -> Option<loaders::Kind> {
+        match self {
+            JavaLoader::None => None,
+            JavaLoader::Fabric => Some(loaders::Kind::Fabric),
+            JavaLoader::Quilt => Some(loaders::Kind::Quilt),
+        }
+    }
+
+    fn of(kind: Option<loaders::Kind>) -> JavaLoader {
+        match kind {
+            None => JavaLoader::None,
+            Some(loaders::Kind::Fabric) => JavaLoader::Fabric,
+            Some(loaders::Kind::Quilt) => JavaLoader::Quilt,
+        }
+    }
 }
 
 /// The instances and their icons as images, kept between frames.
@@ -194,7 +227,16 @@ impl Launcher {
                     self.page == Page::Play && selected.as_ref() == Some(&i.id),
                     match (&tag, &i.version) {
                         _ if i.java.is_some() => {
-                            format!("Minecraft {}", i.java.as_ref().map_or("", |j| &j.minecraft))
+                            let java = i.java.as_ref();
+                            let game = java.map_or("", |j| j.minecraft.as_str());
+                            match java.and_then(|j| j.loader.as_ref()) {
+                                Some(loader) => format!(
+                                    "Minecraft {game} · {} {}",
+                                    loader.kind.name(),
+                                    loader.version
+                                ),
+                                None => format!("Minecraft {game}"),
+                            }
                         }
                         (None, Some(own)) => trf("{version} is not installed", &[("version", own)]),
                         (None, None) => tr("No version installed").into(),
@@ -274,6 +316,12 @@ impl Launcher {
             .unwrap_or_default();
         self.servers.text(Field::InstanceName).set(name);
         self.servers.text(Field::InstanceGroup).set(group);
+        let java = editing.as_ref().and_then(|i| i.java.clone());
+        self.servers.text(Field::InstanceMinecraft).set(
+            java.as_ref()
+                .map(|j| j.minecraft.clone())
+                .unwrap_or_default(),
+        );
         self.servers.focus_soon = Some(Field::InstanceName);
         self.instances.dialog = Some(InstanceDialog {
             icon: editing.as_ref().and_then(|i| i.icon.clone()),
@@ -281,6 +329,12 @@ impl Launcher {
             copy: false,
             error: None,
             busy: false,
+            java: java.is_some(),
+            loader: JavaLoader::of(
+                java.as_ref()
+                    .and_then(|j| j.loader.as_ref())
+                    .map(|l| l.kind),
+            ),
         });
     }
 
@@ -299,19 +353,60 @@ impl Launcher {
         let selected = self.selected_instance().map(|i| i.id.clone());
         let name = self.servers.value(Field::InstanceName).trim().to_string();
         let group = Some(self.servers.value(Field::InstanceGroup).to_string());
+        let minecraft = self
+            .servers
+            .value(Field::InstanceMinecraft)
+            .trim()
+            .to_string();
         let Some(d) = self.instances.dialog.as_mut().filter(|d| !d.busy) else {
             return;
         };
         let icon = d.icon.clone();
         let editing = d.editing.clone();
+        let java = d.java;
+        let loader = d.loader;
         let copy = selected.filter(|_| d.copy);
         d.busy = true;
         d.error = None;
         let task = cx.background_executor().spawn(async move {
             let id = match editing {
                 Some(id) => id,
+                None if java => {
+                    // An empty field means the newest release; Mojang's list has the id.
+                    let versions = minecraft_versions::load()?;
+                    let chosen = if minecraft.is_empty() {
+                        versions.latest_release.clone()
+                    } else {
+                        versions.find(&minecraft)?.id.clone()
+                    };
+                    instances::create_java(&name, &chosen)?.id
+                }
                 None => instances::create(&name, copy.as_deref())?.id,
             };
+            if java {
+                if !minecraft.is_empty() {
+                    instances::edit(&id, |m| {
+                        if let Some(j) = m.java.as_mut() {
+                            j.minecraft = minecraft.clone();
+                        }
+                    })?;
+                }
+                // The newest stable loader for that Minecraft version: it must exist before the
+                // game starts, and the Mods page filters its results on it.
+                let minecraft = instances::find(&id)?
+                    .java
+                    .map(|j| j.minecraft)
+                    .unwrap_or_default();
+                let chosen = loader
+                    .kind()
+                    .map(|kind| loaders::choose(kind.id(), &minecraft, None))
+                    .transpose()?;
+                instances::edit(&id, |m| {
+                    if let Some(j) = m.java.as_mut() {
+                        j.loader = chosen;
+                    }
+                })?;
+            }
             instances::edit(&id, |m| {
                 m.name = Some(name);
                 m.group = group;
@@ -353,6 +448,7 @@ impl Launcher {
             d.error.clone(),
             d.busy,
         );
+        let (java, loader) = (d.java, d.loader);
         let from = self
             .selected_instance()
             .map_or_else(|| "Morizen".into(), |i| i.name.clone());
@@ -408,6 +504,66 @@ impl Launcher {
             } else {
                 "Its own worlds and packs; your options and player name come along.".to_string()
             }));
+        }
+        if !editing {
+            let weak = cx.entity().downgrade();
+            body = body.child(row(
+                "Game",
+                segments(
+                    "instance-game",
+                    &[(false, "Morizen"), (true, "Minecraft Java")],
+                    java,
+                    &t,
+                    move |java, _, cx| {
+                        let _ = weak.update(cx, |this, cx| {
+                            if let Some(d) = &mut this.instances.dialog {
+                                d.java = java;
+                            }
+                            cx.notify();
+                        });
+                    },
+                )
+                .into_any_element(),
+            ));
+        }
+        if java {
+            body = body.child(row(
+                "Minecraft version",
+                self.field(
+                    Field::InstanceMinecraft,
+                    "newest release, e.g. 1.21.8",
+                    400.,
+                    cx,
+                )
+                .into_any_element(),
+            ));
+            let weak = cx.entity().downgrade();
+            body = body.child(row(
+                "Mod loader",
+                segments(
+                    "instance-loader",
+                    &[
+                        (JavaLoader::None, "None"),
+                        (JavaLoader::Fabric, "Fabric"),
+                        (JavaLoader::Quilt, "Quilt"),
+                    ],
+                    loader,
+                    &t,
+                    move |loader, _, cx| {
+                        let _ = weak.update(cx, |this, cx| {
+                            if let Some(d) = &mut this.instances.dialog {
+                                d.loader = loader;
+                            }
+                            cx.notify();
+                        });
+                    },
+                )
+                .into_any_element(),
+            ));
+            body = body.child(text(theme::CAPTION).text_color(t.muted).child(
+                "A Java instance plays the real Minecraft. The Mods page installs its Fabric \
+                     or Quilt mods into this instance.",
+            ));
         }
         body = body.child(row(
             "Group",
