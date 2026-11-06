@@ -14,6 +14,8 @@ more than 300 differential harnesses. Morizen keeps that engine and gives it its
 
 - **The launcher.** Its name, window title, text in every language, desktop entry and shortcuts say
   Morizen, and **Settings › About** has a **Fork** row that names the project it comes from.
+- **Offine** Supporting Offline Mode Accounts.
+- **Mobile** A New Version that Support Mobile too!
 - **The look.** The Blocks palette — the colours of the launcher and the project site — is warm neutrals
   with a gold accent instead of Horizon's cool violet. The game's own menus keep the neutral palette they
   had.
