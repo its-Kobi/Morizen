@@ -275,7 +275,7 @@ impl Gfx {
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("morizen-shell-2d"),
             bind_group_layouts: &[],
-            push_constant_ranges: &[],
+            immediate_size: 0,
         });
         let attributes = [
             wgpu::VertexAttribute {
