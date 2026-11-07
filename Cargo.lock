@@ -2307,13 +2307,16 @@ name = "morizen-android"
 version = "0.1.0"
 dependencies = [
  "android_logger",
+ "bytemuck",
  "horizon-client",
  "horizon-protocol",
  "log",
+ "pollster",
  "serde",
  "serde_json",
  "sha1",
  "ureq",
+ "wgpu",
  "winit",
  "zip",
 ]

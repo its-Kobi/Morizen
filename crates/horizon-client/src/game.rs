@@ -191,6 +191,8 @@ mod text_displays;
 mod titles;
 mod tnt;
 mod totem;
+#[cfg(feature = "touch-controls")]
+mod touch_controls;
 mod trading;
 mod trial_spawner;
 mod trial_visuals;
@@ -281,24 +283,44 @@ use winit::{
     window::{CursorGrabMode, Window, WindowId},
 };
 
-#[cfg(target_os = "android")]
-static ANDROID_APP: std::sync::Mutex<Option<winit::platform::android::activity::AndroidApp>> =
+/// What the Android shell decided to start: its prepared resources and the player's name.
+#[cfg(feature = "android-game")]
+pub static ANDROID_LAUNCH: std::sync::Mutex<Option<(std::path::PathBuf, Option<String>)>> =
     std::sync::Mutex::new(None);
 
-/// The event loop for this platform. Android's NativeActivity gives Winit the app handle through
-/// `android_main`; desktop platforms create their event loop directly.
+/// The resources the Android shell prepared, when this process is its game (desktop: never).
+#[cfg(feature = "android-game")]
+fn android_resources() -> Option<PathBuf> {
+    ANDROID_LAUNCH
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|(resources, _)| resources.clone())
+}
+
+#[cfg(not(feature = "android-game"))]
+fn android_resources() -> Option<PathBuf> {
+    None
+}
+
+/// The player name the Android shell chose, when this process is its game.
+#[cfg(feature = "android-game")]
+fn android_name() -> Option<String> {
+    ANDROID_LAUNCH
+        .lock()
+        .unwrap()
+        .as_ref()
+        .and_then(|(_, name)| name.clone())
+}
+
+#[cfg(not(feature = "android-game"))]
+fn android_name() -> Option<String> {
+    None
+}
+
+/// The event loop of a launch that owns its process. Android instead runs on the loop the shell
+/// created (`AndroidGame`), because winit allows only one event loop per process.
 fn event_loop() -> std::result::Result<EventLoop<()>, EventLoopError> {
-    #[cfg(target_os = "android")]
-    {
-        use winit::platform::android::EventLoopBuilderExtAndroid;
-        let app = ANDROID_APP
-            .lock()
-            .unwrap()
-            .clone()
-            .expect("android_main did not provide AndroidApp");
-        return EventLoop::builder().with_android_app(app).build();
-    }
-    #[cfg(not(target_os = "android"))]
     EventLoop::new()
 }
 
@@ -378,11 +400,14 @@ impl Options {
             .ok_or("missing executable directory")?
             .join("resources");
         let mut o = Self {
-            resources: if sibling.join("horizon-resources.json").exists() {
-                sibling
-            } else {
-                std::path::Path::new(".local/horizon-client").join(horizon_core::VANILLA_VERSION)
-            },
+            resources: android_resources().unwrap_or_else(|| {
+                if sibling.join("horizon-resources.json").exists() {
+                    sibling
+                } else {
+                    std::path::Path::new(".local/horizon-client")
+                        .join(horizon_core::VANILLA_VERSION)
+                }
+            }),
             distance: 12,
             distance_override: None,
             seed: 0,
@@ -406,9 +431,11 @@ impl Options {
                 .ok()
                 .and_then(|v| v.parse().ok()),
             server: None,
-            player_name: std::env::var("HORIZON_PLAYER_NAME")
-                .ok()
-                .filter(|n| !n.is_empty()),
+            player_name: android_name().or_else(|| {
+                std::env::var("HORIZON_PLAYER_NAME")
+                    .ok()
+                    .filter(|n| !n.is_empty())
+            }),
             dedicated: None,
             benchmark: None,
             dev_mods: Vec::new(),
@@ -1553,6 +1580,8 @@ struct Game<'a> {
     /// The game mode; `creative` mirrors `mode == Creative`.
     mode: horizon_client::command::args::GameMode,
     keys: HashSet<KeyCode>,
+    #[cfg(feature = "touch-controls")]
+    touch: touch_controls::TouchControls,
     // Physical input is separate from remapped and toggled movement keys.
     physical_keys: HashSet<KeyCode>,
     physical_buttons: HashSet<MouseButton>,
@@ -6218,6 +6247,8 @@ impl Game<'_> {
         self.draw_debug_overlay(&mut batch, size);
         self.frame_graph
             .draw(self.settings.horizon.overlay, &mut batch, &self.gui.atlas);
+        #[cfg(feature = "touch-controls")]
+        self.draw_touch_controls(&mut batch);
         self.draw_pad_cursor(&mut batch);
         batch
     }
@@ -13122,6 +13153,8 @@ impl ApplicationHandler for Game<'_> {
         if let WindowEvent::Focused(false) = &event {
             self.physical_keys.clear();
             self.physical_buttons.clear();
+            #[cfg(feature = "touch-controls")]
+            self.release_touch_controls();
         }
         if let WindowEvent::ModifiersChanged(m) = &event {
             self.modifiers = m.state();
@@ -13233,6 +13266,11 @@ impl ApplicationHandler for Game<'_> {
             return;
         }
         let result: Result<()> = (|| {
+            #[cfg(feature = "touch-controls")]
+            if let WindowEvent::Touch(touch) = &event {
+                self.touch_event(*touch)?;
+                return Ok(());
+            }
             match event {
                 WindowEvent::CloseRequested => {
                     self.begin_closing_save(true)?;
@@ -14295,6 +14333,8 @@ impl<'a> Game<'a> {
                 horizon_client::command::args::GameMode::Survival
             },
             keys: HashSet::new(),
+            #[cfg(feature = "touch-controls")]
+            touch: touch_controls::TouchControls::load(&std::env::current_dir()?),
             physical_keys: HashSet::new(),
             physical_buttons: HashSet::new(),
             left: false,
@@ -15558,8 +15598,8 @@ fn leave_fullscreen_after(
     }
 }
 
-fn run_event_loop(mut game: Game<'_>) -> Result<()> {
-    let result = event_loop()?.run_app(&mut game);
+fn run_event_loop(event_loop: EventLoop<()>, mut game: Game<'_>) -> Result<()> {
+    let result = event_loop.run_app(&mut game);
     leave_fullscreen_after(&result, &mut game.settings);
     result?;
     horizon_client::discord_presence::stop();
@@ -15920,15 +15960,14 @@ fn missing_resources(root: &std::path::Path) -> Option<String> {
     ))
 }
 
-/// The ordinary launch: load the resources on a worker while the window shows
-/// the loading screen, then swap in the game on the main thread.
-fn run_loading(
+/// The loading screen's state and its worker, ready to be driven by an event loop.
+fn prepare_loading(
     options: Options,
     settings: Settings,
     vanilla_root: PathBuf,
     pack_error: Option<String>,
     started: Instant,
-) -> Result<()> {
+) -> Result<App> {
     let progress = Progress::new();
     let (receiver, loader) =
         startup_menu::spawn_loader(&options, &settings, &vanilla_root, started, &progress)?;
@@ -15953,8 +15992,21 @@ fn run_loading(
         menu,
         error: None,
     };
-    let mut app = App::Loading(Box::new(loading));
-    let result = event_loop()?.run_app(&mut app);
+    Ok(App::Loading(Box::new(loading)))
+}
+
+/// The ordinary launch: load the resources on a worker while the window shows
+/// the loading screen, then swap in the game on the main thread.
+fn run_loading(
+    event_loop: EventLoop<()>,
+    options: Options,
+    settings: Settings,
+    vanilla_root: PathBuf,
+    pack_error: Option<String>,
+    started: Instant,
+) -> Result<()> {
+    let mut app = prepare_loading(options, settings, vanilla_root, pack_error, started)?;
+    let result = event_loop.run_app(&mut app);
     match &mut app {
         App::Ready(game) => leave_fullscreen_after(&result, &mut game.settings),
         App::Loading(loading) => leave_fullscreen_after(&result, &mut loading.settings),
@@ -15977,14 +16029,24 @@ fn run_loading(
     Ok(())
 }
 
-pub fn run() -> Result<()> {
+/// What a client launch does before its event loop exists: options, threads, the heartbeat, and
+/// the prepared-resource check.
+struct Prepared {
+    options: Options,
+    settings: Settings,
+    vanilla_root: PathBuf,
+    started: Instant,
+}
+
+/// `None` when the command line did not ask for a game (`--help`, a refused server preflight).
+fn prepare() -> Result<Option<Prepared>> {
     let Some(mut options) = Options::read()? else {
-        return Ok(());
+        return Ok(None);
     };
     if options.execution_role == execution_role::ExecutionRole::DedicatedServer
         && !dedicated::preflight(&mut options)?
     {
-        return Ok(());
+        return Ok(None);
     }
     // Before any worker starts: on Linux they go behind the server thread
     // and the render thread.
@@ -16032,8 +16094,33 @@ pub fn run() -> Result<()> {
     // Snapshots of derived tables live in the game folder, never beside the
     // shared resources.
     Behaviours::set_cache_dir(std::env::current_dir()?.join(".horizon-cache"));
+    Ok(Some(Prepared {
+        options,
+        settings: early_settings,
+        vanilla_root,
+        started,
+    }))
+}
+
+pub fn run() -> Result<()> {
+    let Some(Prepared {
+        mut options,
+        settings: early_settings,
+        vanilla_root,
+        started,
+    }) = prepare()?
+    else {
+        return Ok(());
+    };
     if !synchronous_startup(&options) {
-        return run_loading(options, early_settings, vanilla_root, None, started);
+        return run_loading(
+            event_loop()?,
+            options,
+            early_settings,
+            vanilla_root,
+            None,
+            started,
+        );
     }
     let mut pack_error = None;
     options.resources = packs::startup_root(&vanilla_root, &early_settings.resource_packs, &[])
@@ -16078,17 +16165,53 @@ pub fn run() -> Result<()> {
         None,
     )?;
     if let Some(game) = game {
-        run_event_loop(game)?;
+        run_event_loop(event_loop()?, game)?;
     }
     Ok(())
 }
 
-/// Android NativeActivity entry: keep its handle where both startup paths can build Winit's one
-/// event loop, then run the same game as desktop.
-#[cfg(target_os = "android")]
-pub fn run_android(app: winit::platform::android::activity::AndroidApp) -> Result<()> {
-    *ANDROID_APP.lock().unwrap() = Some(app);
-    run()
+/// The game as the Android shell runs it: on the event loop the shell created, because winit
+/// allows only one loop per process. The shell swaps itself out for this handler on Play.
+#[cfg(feature = "android-game")]
+pub struct AndroidGame {
+    app: App,
+}
+
+#[cfg(feature = "android-game")]
+impl AndroidGame {
+    /// The same launch as [`run`], with the resources and name the shell holds.
+    pub fn start(resources: PathBuf, name: String) -> Result<Self> {
+        *ANDROID_LAUNCH.lock().unwrap() = Some((resources, Some(name)));
+        let prepared = prepare()?.ok_or("Morizen's shell launched without a game request.")?;
+        Ok(Self {
+            app: prepare_loading(
+                prepared.options,
+                prepared.settings,
+                prepared.vanilla_root,
+                None,
+                prepared.started,
+            )?,
+        })
+    }
+}
+
+#[cfg(feature = "android-game")]
+impl ApplicationHandler for AndroidGame {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        self.app.resumed(event_loop);
+    }
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        self.app.window_event(event_loop, id, event);
+    }
+    fn device_event(&mut self, event_loop: &ActiveEventLoop, id: DeviceId, event: DeviceEvent) {
+        self.app.device_event(event_loop, id, event);
+    }
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.app.about_to_wait(event_loop);
+    }
+    fn exiting(&mut self, event_loop: &ActiveEventLoop) {
+        self.app.exiting(event_loop);
+    }
 }
 
 /// The right and left arms of a player model layer (`PlayerModel.rightArm`

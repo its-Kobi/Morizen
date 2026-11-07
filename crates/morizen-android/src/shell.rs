@@ -1,0 +1,782 @@
+//! The Android app's own screen: it opens before anything is downloaded, stays open, fetches the
+//! player's Minecraft files on request, and edits the touch layout. The game itself is a separate
+//! launch that only happens once prepared resources exist.
+//!
+//! Only `run` is Android-specific: the rest also compiles on desktop CI, where the workspace
+//! clippy and test jobs check it.
+#![cfg_attr(not(target_os = "android"), allow(dead_code))]
+
+use crate::gfx2d::{Gfx, Painter, Rect};
+use crate::manifest::{self, Phase, Progress};
+use horizon_client::touch::{Action, Layout};
+use std::path::PathBuf;
+use std::sync::mpsc::{Receiver, channel};
+use std::sync::{Arc, Mutex};
+use winit::application::ApplicationHandler;
+use winit::event::{Ime, TouchPhase, WindowEvent};
+use winit::event_loop::{ActiveEventLoop, ControlFlow};
+use winit::window::{Window, WindowId};
+
+const BACKGROUND: [f32; 4] = [0.043, 0.047, 0.063, 1.0];
+const PANEL: [f32; 4] = [0.086, 0.094, 0.121, 1.0];
+const LINE: [f32; 4] = [0.24, 0.26, 0.33, 1.0];
+const TEXT: [f32; 4] = [0.88, 0.90, 0.94, 1.0];
+const MUTED: [f32; 4] = [0.55, 0.58, 0.66, 1.0];
+const ACCENT: [f32; 4] = [0.83, 0.63, 0.30, 1.0];
+const BUTTON: [f32; 4] = [0.14, 0.16, 0.21, 1.0];
+const DISABLED: [f32; 4] = [0.10, 0.11, 0.14, 1.0];
+
+const VERSION: &str = "26.3";
+
+#[derive(Clone, Debug)]
+struct Paths {
+    /// Saves, options.txt and the touch layout: the game's working directory.
+    game: PathBuf,
+    /// The prepared resource root: `assets/`, `data/` and, once the exporters have run,
+    /// `horizon-resources.json`.
+    prepared: PathBuf,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Page {
+    Home,
+    Controls,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Act {
+    Download,
+    Play,
+    Controls,
+    Back,
+    Name,
+    SizeDown,
+    SizeUp,
+    AlphaDown,
+    AlphaUp,
+    SensDown,
+    SensUp,
+    Reset,
+    AddKey,
+    RemoveKey,
+}
+
+enum Msg {
+    Progress(Progress),
+    Done(Result<(usize, usize), String>),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Field {
+    Name,
+    Key,
+}
+
+pub struct Shell {
+    window: Option<Arc<Window>>,
+    gfx: Option<Gfx>,
+    paths: Paths,
+    page: Page,
+    status: String,
+    layout: Layout,
+    layout_path: PathBuf,
+    name: String,
+    name_path: PathBuf,
+    editing: Option<Field>,
+    job: Option<Receiver<Msg>>,
+    progress: Option<Progress>,
+    hits: Vec<(Rect, Act)>,
+    drag: Option<(u64, String)>,
+    selected: Option<String>,
+    needs_redraw: bool,
+    launch: bool,
+}
+
+impl Shell {
+    fn new(paths: Paths) -> Self {
+        let layout_path = paths.game.join("touch-controls.json");
+        let name_path = paths.game.join("player-name.txt");
+        let name = std::fs::read_to_string(&name_path)
+            .ok()
+            .map(|name| name.trim().to_owned())
+            .filter(|name| (3..=16).contains(&name.len()))
+            .unwrap_or_else(|| "Player".to_owned());
+        let mut status = String::new();
+        if Self::missing(&paths) {
+            status.push_str(
+                "Minecraft's files are not on this device yet. Downloading needs a Microsoft \
+                 account that owns Minecraft: Java Edition, and about 1 GB of free space.",
+            );
+        } else {
+            status.push_str("Minecraft's files are ready on this device.");
+        }
+        Self {
+            window: None,
+            gfx: None,
+            paths,
+            page: Page::Home,
+            status,
+            layout: Layout::load(&layout_path),
+            layout_path,
+            name,
+            name_path,
+            editing: None,
+            job: None,
+            progress: None,
+            hits: Vec::new(),
+            drag: None,
+            selected: None,
+            needs_redraw: true,
+            launch: false,
+        }
+    }
+
+    fn missing(paths: &Paths) -> bool {
+        !paths.prepared.join("horizon-resources.json").is_file()
+    }
+
+    fn poll_job(&mut self) {
+        let Some(receiver) = &self.job else {
+            return;
+        };
+        let mut done = false;
+        loop {
+            match receiver.try_recv() {
+                Ok(Msg::Progress(progress)) => {
+                    self.progress = Some(progress);
+                    self.needs_redraw = true;
+                }
+                Ok(Msg::Done(Ok((files, assets)))) => {
+                    self.progress = None;
+                    self.status = format!(
+                        "Minecraft {VERSION} is downloaded: {files} files from Mojang's client jar \
+                         and {assets} assets, all checked against their SHA-1. The prepared game \
+                         data still has to be built from them, which needs the exporter step that \
+                         is not on Android yet."
+                    );
+                    done = true;
+                }
+                Ok(Msg::Done(Err(error))) => {
+                    self.progress = None;
+                    self.status = format!("The download stopped: {error}");
+                    done = true;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.progress = None;
+                    done = true;
+                    break;
+                }
+            }
+        }
+        if done {
+            self.job = None;
+        }
+        self.needs_redraw = true;
+    }
+
+    fn download(&mut self) {
+        if self.job.is_some() {
+            return;
+        }
+        let (sender, receiver) = channel();
+        let sender = Arc::new(Mutex::new(sender));
+        let paths = self.paths.clone();
+        self.job = Some(receiver);
+        self.status = format!("Downloading Minecraft {VERSION} from Mojang…");
+        let worker = sender.clone();
+        std::thread::spawn(move || {
+            let progress = {
+                let sender = worker.clone();
+                move |progress: Progress| {
+                    let _ = sender.lock().unwrap().send(Msg::Progress(progress));
+                }
+            };
+            let result = manifest::download(VERSION, &paths.prepared, &progress)
+                .and_then(|downloaded| manifest::extract_raw(&downloaded, &paths.prepared));
+            let _ = worker.lock().unwrap().send(Msg::Done(result));
+        });
+    }
+
+    fn activate(&mut self, act: Act) {
+        match act {
+            Act::Download => self.download(),
+            Act::Controls => {
+                self.page = Page::Controls;
+                self.status.clear();
+            }
+            Act::Back => {
+                self.page = Page::Home;
+                self.save_layout();
+            }
+            Act::Play => {
+                if Self::missing(&self.paths) {
+                    self.status = "Play needs the prepared game data. Downloading Minecraft's \
+                                   files is the first step; the exporter step is still missing on \
+                                   Android."
+                        .to_owned();
+                } else {
+                    self.launch = true;
+                    self.status = "Starting Minecraft…".to_owned();
+                    self.needs_redraw = true;
+                }
+            }
+            Act::Name => self.begin_edit(Field::Name),
+            Act::SizeDown => self.resize_layout(-1.0),
+            Act::SizeUp => self.resize_layout(1.0),
+            Act::AlphaDown => self.alpha_layout(-0.1),
+            Act::AlphaUp => self.alpha_layout(0.1),
+            Act::SensDown => self.sensitivity_layout(-0.02),
+            Act::SensUp => self.sensitivity_layout(0.02),
+            Act::Reset => {
+                self.layout = Layout::default();
+                self.selected = None;
+                self.save_layout();
+            }
+            Act::AddKey => self.begin_edit(Field::Key),
+            Act::RemoveKey => {
+                let id = self
+                    .selected
+                    .clone()
+                    .filter(|id| id.starts_with("custom-"))
+                    .or_else(|| {
+                        self.layout
+                            .buttons
+                            .iter()
+                            .rev()
+                            .find(|button| button.id.starts_with("custom-"))
+                            .map(|button| button.id.clone())
+                    });
+                if let Some(id) = id {
+                    self.layout.remove_custom(&id);
+                    self.selected = None;
+                    self.save_layout();
+                }
+            }
+        }
+        self.needs_redraw = true;
+    }
+
+    fn begin_edit(&mut self, field: Field) {
+        self.editing = Some(field);
+        if let Some(window) = &self.window {
+            window.set_ime_allowed(true);
+        }
+    }
+
+    fn commit_edit(&mut self, text: &str) {
+        let Some(field) = self.editing.take() else {
+            return;
+        };
+        if let Some(window) = &self.window {
+            window.set_ime_allowed(false);
+        }
+        match field {
+            Field::Name => {
+                let name: String = text
+                    .chars()
+                    .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+                    .take(16)
+                    .collect();
+                if (3..=16).contains(&name.len()) {
+                    self.name = name;
+                    let _ = std::fs::write(&self.name_path, &self.name);
+                    self.status = format!("Player name set to {}.", self.name);
+                } else {
+                    self.status = "A name is 3 to 16 letters, digits or underscores.".to_owned();
+                }
+            }
+            Field::Key => {
+                let key = text.trim().to_ascii_lowercase();
+                let action = if key.starts_with("key.mouse.") {
+                    Action::Mouse(key)
+                } else if key.starts_with("key.") {
+                    Action::Key(key)
+                } else {
+                    Action::Key(format!("key.keyboard.{key}"))
+                };
+                if !action.valid() {
+                    self.status = format!("{text:?} is not a Minecraft key name.");
+                } else {
+                    let label = text.trim().to_ascii_uppercase();
+                    match self.layout.add_custom(&label, action) {
+                        Ok(button) => {
+                            let id = button.id.clone();
+                            self.selected = Some(id);
+                            self.save_layout();
+                            self.status =
+                                format!("Added a {label} button; drag it where you want.");
+                        }
+                        Err(error) => self.status = error,
+                    }
+                }
+            }
+        }
+        self.needs_redraw = true;
+    }
+
+    fn save_layout(&mut self) {
+        if let Err(error) = self.layout.save(&self.layout_path) {
+            self.status = format!("Could not save the touch layout: {error}");
+        }
+    }
+
+    fn alpha_layout(&mut self, delta: f32) {
+        self.layout.opacity = (self.layout.opacity + delta).clamp(0.15, 1.0);
+        self.save_layout();
+    }
+
+    fn sensitivity_layout(&mut self, delta: f32) {
+        self.layout.look_sensitivity = (self.layout.look_sensitivity + delta).clamp(0.03, 1.0);
+        self.save_layout();
+    }
+
+    /// `SIZE -`/`SIZE +`: the picked button's own size, else every button's at once.
+    fn resize_layout(&mut self, step: f32) {
+        let index = self.selected.as_deref().and_then(|id| {
+            self.layout
+                .buttons
+                .iter()
+                .position(|button| button.id == id)
+        });
+        if let Some(index) = index {
+            let size = (self.layout.buttons[index].size + step * 0.01).clamp(0.04, 0.25);
+            let id = self.layout.buttons[index].id.clone();
+            self.layout.resize_button(&id, size);
+        } else {
+            self.layout.scale = (self.layout.scale + step * 0.1).clamp(0.5, 2.0);
+        }
+        self.save_layout();
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn button(
+        &mut self,
+        painter: &mut Painter,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        label: &str,
+        act: Act,
+        enabled: bool,
+    ) {
+        let area = Rect::new(x, y, w, h);
+        painter.frame(
+            area,
+            if enabled { BUTTON } else { DISABLED },
+            if enabled { LINE } else { PANEL },
+        );
+        let size = Painter::fitted(label, 3.0 * painter.ui, w - 8.0 * painter.ui);
+        let color = if enabled { TEXT } else { MUTED };
+        painter.text_centered(x + w / 2.0, y + (h - size) / 2.0, label, size, color);
+        if enabled {
+            self.hits.push((area, act));
+        }
+    }
+
+    fn paint_home(&mut self, painter: &mut Painter) {
+        let (w, h, ui) = (painter.width, painter.height, painter.ui);
+        painter.text_centered(w / 2.0, h * 0.04, "MORIZEN", 10.0 * ui, TEXT);
+        painter.text_centered(
+            w / 2.0,
+            h * 0.04 + 12.0 * ui,
+            "MINECRAFT JAVA 26.3 FOR ANDROID",
+            2.4 * ui,
+            ACCENT,
+        );
+        let top = (h * 0.19).max(h * 0.04 + 21.0 * ui);
+        let panel = Rect::new(w * 0.05, top, w * 0.90, h * 0.30);
+        painter.frame(panel, PANEL, LINE);
+        let size = 2.4 * ui;
+        let mut y = panel.y + 4.0 * ui;
+        for line in Painter::wrap(&self.status, size, panel.w - 8.0 * ui)
+            .into_iter()
+            .take(6)
+        {
+            painter.text(panel.x + 4.0 * ui, y, &line, size, TEXT);
+            y += size * 1.4;
+        }
+        if let Some(progress) = &self.progress {
+            y += 2.0 * ui;
+            let bar = Rect::new(panel.x + 4.0 * ui, y, panel.w - 8.0 * ui, 3.0 * ui);
+            painter.frame(bar, BACKGROUND, LINE);
+            let fraction = if progress.total == 0 {
+                0.0
+            } else {
+                (progress.done as f32 / progress.total as f32).clamp(0.0, 1.0)
+            };
+            painter.rect(
+                bar.x + 1.0,
+                bar.y + 1.0,
+                (bar.w - 2.0) * fraction,
+                bar.h - 2.0,
+                ACCENT,
+            );
+            y += 5.0 * ui;
+            let label = format!(
+                "{} {}/{}",
+                match progress.phase {
+                    Phase::Manifest => "MANIFEST",
+                    Phase::Version => "VERSION",
+                    Phase::Client => "CLIENT",
+                    Phase::AssetIndex => "INDEX",
+                    Phase::Assets => "ASSETS",
+                },
+                progress.done,
+                progress.total
+            );
+            painter.text(panel.x + 4.0 * ui, y, &label, 2.2 * ui, MUTED);
+        }
+
+        let bw = w * 0.66;
+        let bh = 9.0 * ui;
+        let bx = (w - bw) / 2.0;
+        let mut y = h * 0.55;
+        let gap = 2.5 * ui;
+        let downloading = self.job.is_some();
+        self.button(
+            painter,
+            bx,
+            y,
+            bw,
+            bh,
+            "DOWNLOAD GAME FILES",
+            Act::Download,
+            !downloading,
+        );
+        y += bh + gap;
+        self.button(
+            painter,
+            bx,
+            y,
+            bw,
+            bh,
+            "TOUCH CONTROLS",
+            Act::Controls,
+            true,
+        );
+        y += bh + gap;
+        let playable = !Self::missing(&self.paths);
+        self.button(painter, bx, y, bw, bh, "PLAY", Act::Play, playable);
+        y += bh + gap;
+        let name = format!("PLAYER: {}", self.name.to_ascii_uppercase());
+        self.button(painter, bx, y, bw, 7.0 * ui, &name, Act::Name, !downloading);
+    }
+
+    fn paint_controls(&mut self, painter: &mut Painter) {
+        let (w, h, ui) = (painter.width, painter.height, painter.ui);
+        let rows: [[(&str, Act); 5]; 2] = [
+            [
+                ("BACK", Act::Back),
+                ("SIZE -", Act::SizeDown),
+                ("SIZE +", Act::SizeUp),
+                ("ALPHA -", Act::AlphaDown),
+                ("ALPHA +", Act::AlphaUp),
+            ],
+            [
+                ("LOOK -", Act::SensDown),
+                ("LOOK +", Act::SensUp),
+                ("ADD KEY", Act::AddKey),
+                ("REMOVE", Act::RemoveKey),
+                ("RESET", Act::Reset),
+            ],
+        ];
+        let bh = 8.0 * ui;
+        let gap = 1.2 * ui;
+        let bar = Rect::new(0.0, 0.0, w, 2.0 * bh + 3.0 * gap);
+        painter.rect(bar.x, bar.y, bar.w, bar.h, PANEL);
+        for (row, entries) in rows.into_iter().enumerate() {
+            let n = entries.len() as f32;
+            let bw = (w - 2.0 * ui - gap * (n - 1.0)) / n;
+            let mut x = ui;
+            let y = gap + row as f32 * (bh + gap);
+            for (label, act) in entries {
+                self.button(painter, x, y, bw, bh, label, act, true);
+                x += bw + gap;
+            }
+        }
+
+        let selected = self
+            .selected
+            .as_deref()
+            .and_then(|id| self.layout.buttons.iter().find(|button| &button.id == id));
+        let hint = match selected {
+            Some(button) => format!(
+                "{} SELECTED  SIZE {:.2}  DRAG TO MOVE",
+                button.label, button.size
+            ),
+            None => format!(
+                "DRAG A BUTTON TO MOVE IT.  WHOLE LAYOUT {:.2}  ALPHA {:.2}  LOOK {:.2}",
+                self.layout.scale, self.layout.opacity, self.layout.look_sensitivity
+            ),
+        };
+        painter.text(ui, bar.h + gap, &hint, 2.2 * ui, MUTED);
+
+        let screen = [w, h];
+        let bounds = self.layout.buttons.iter().map(|button| {
+            (
+                button.id.clone(),
+                button.label.clone(),
+                button.bounds(screen, self.layout.scale),
+            )
+        });
+        for (id, label, [bx, by, bw, bh]) in bounds.collect::<Vec<_>>() {
+            let selected = self.selected.as_deref() == Some(id.as_str());
+            painter.frame(
+                Rect::new(bx, by, bw, bh),
+                if selected {
+                    [0.33, 0.27, 0.15, 0.85]
+                } else {
+                    [0.08, 0.09, 0.12, 0.75]
+                },
+                if selected { ACCENT } else { LINE },
+            );
+            let size = Painter::fitted(&label, 2.4 * ui, bw - 4.0);
+            painter.text_centered(bx + bw / 2.0, by + (bh - size) / 2.0, &label, size, TEXT);
+        }
+    }
+
+    fn draw(&mut self) {
+        let (width, height) = match self.gfx.as_ref() {
+            Some(gfx) => (gfx.width(), gfx.height()),
+            None => return,
+        };
+        let mut painter = Painter::new(width as f32, height as f32);
+        painter.clear(BACKGROUND);
+        self.hits.clear();
+        match self.page {
+            Page::Home => self.paint_home(&mut painter),
+            Page::Controls => self.paint_controls(&mut painter),
+        }
+        if let Some(gfx) = self.gfx.as_mut() {
+            gfx.draw(&painter);
+        }
+    }
+
+    fn touch(&mut self, id: u64, phase: TouchPhase, at: [f32; 2]) {
+        match phase {
+            TouchPhase::Started => {
+                let hit = self
+                    .hits
+                    .iter()
+                    .rev()
+                    .find(|(rect, _)| rect.contains(at))
+                    .map(|(_, act)| *act);
+                if let Some(act) = hit {
+                    self.activate(act);
+                    return;
+                }
+                let layout_hit = if self.page == Page::Controls {
+                    self.layout.hit(at, self.screen()).map(|b| b.id.clone())
+                } else {
+                    None
+                };
+                if let Some(button) = layout_hit {
+                    self.selected = Some(button.clone());
+                    self.drag = Some((id, button));
+                    self.needs_redraw = true;
+                }
+            }
+            TouchPhase::Moved => {
+                if let Some((finger, button)) = self.drag.clone()
+                    && finger == id
+                {
+                    let screen = self.screen();
+                    let x = at[0] / screen[0];
+                    let y = at[1] / screen[1];
+                    if self.layout.move_button(&button, x, y) {
+                        self.needs_redraw = true;
+                    }
+                }
+            }
+            TouchPhase::Ended | TouchPhase::Cancelled => {
+                if self.drag.take().is_some() {
+                    self.save_layout();
+                }
+            }
+        }
+    }
+
+    fn screen(&self) -> [f32; 2] {
+        self.gfx
+            .as_ref()
+            .map(|gfx| [gfx.width() as f32, gfx.height() as f32])
+            .unwrap_or([1.0, 1.0])
+    }
+}
+
+impl ApplicationHandler for Shell {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        if self.window.is_some() {
+            return;
+        }
+        let window = match event_loop.create_window(
+            Window::default_attributes()
+                .with_title("Morizen")
+                .with_transparent(false),
+        ) {
+            Ok(window) => Arc::new(window),
+            Err(error) => {
+                log::error!("could not open Morizen's window: {error}");
+                event_loop.exit();
+                return;
+            }
+        };
+        match Gfx::new(window.clone()) {
+            Ok(gfx) => self.gfx = Some(gfx),
+            Err(error) => {
+                log::error!("could not start Morizen's drawing: {error}");
+                event_loop.exit();
+                return;
+            }
+        }
+        if let Some(size) = self.gfx.as_ref() {
+            log::info!("Morizen shell {}x{}", size.width(), size.height());
+        }
+        self.window = Some(window);
+        self.needs_redraw = true;
+    }
+
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        match event {
+            WindowEvent::Resized(size) => {
+                if let Some(gfx) = self.gfx.as_mut() {
+                    gfx.resize(size.width, size.height);
+                }
+                self.needs_redraw = true;
+            }
+            WindowEvent::RedrawRequested => self.draw(),
+            WindowEvent::Touch(touch) => {
+                let at = [touch.location.x as f32, touch.location.y as f32];
+                self.touch(touch.id, touch.phase, at);
+            }
+            WindowEvent::Ime(Ime::Commit(text)) => self.commit_edit(&text),
+            WindowEvent::Ime(Ime::Enabled) => {}
+            WindowEvent::Ime(Ime::Disabled) => self.editing = None,
+            WindowEvent::CloseRequested => {
+                self.save_layout();
+                event_loop.exit();
+            }
+            _ => {}
+        }
+    }
+
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.poll_job();
+        event_loop.set_control_flow(if self.job.is_some() {
+            ControlFlow::Poll
+        } else {
+            ControlFlow::Wait
+        });
+        if self.needs_redraw {
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
+            self.needs_redraw = false;
+        }
+    }
+
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        self.save_layout();
+    }
+}
+
+/// The process's only winit handler: Morizen's own screen until the player taps Play, then the
+/// game. Both live on the one event loop winit allows per process; the shell's window and surface
+/// are dropped before the game creates its own on the same native window.
+#[allow(clippy::large_enum_variant)]
+pub enum Stage {
+    Shell(Shell),
+    Game(horizon_client::game::AndroidGame),
+}
+
+impl ApplicationHandler for Stage {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        match self {
+            Stage::Shell(shell) => shell.resumed(event_loop),
+            Stage::Game(game) => game.resumed(event_loop),
+        }
+    }
+
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        match self {
+            Stage::Shell(shell) => shell.window_event(event_loop, id, event),
+            Stage::Game(game) => game.window_event(event_loop, id, event),
+        }
+    }
+
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if let Stage::Game(game) = self {
+            game.about_to_wait(event_loop);
+            return;
+        }
+        let launch = match self {
+            Stage::Shell(shell) => {
+                shell.about_to_wait(event_loop);
+                shell.launch
+            }
+            Stage::Game(_) => false,
+        };
+        if !launch {
+            return;
+        }
+        let request = match self {
+            Stage::Shell(shell) => Some((shell.paths.prepared.clone(), shell.name.clone())),
+            Stage::Game(_) => None,
+        };
+        let Some((resources, name)) = request else {
+            return;
+        };
+        // The game's own launch checks run here; the shell stays in charge if they refuse.
+        match horizon_client::game::AndroidGame::start(resources, name) {
+            Ok(game) => *self = Stage::Game(game),
+            Err(error) => {
+                if let Stage::Shell(shell) = self {
+                    shell.launch = false;
+                    shell.status = format!("Could not start the game: {error}");
+                    shell.needs_redraw = true;
+                }
+                return;
+            }
+        }
+        if let Stage::Game(game) = self {
+            game.resumed(event_loop);
+            game.about_to_wait(event_loop);
+        }
+    }
+
+    fn exiting(&mut self, event_loop: &ActiveEventLoop) {
+        match self {
+            Stage::Shell(shell) => shell.exiting(event_loop),
+            Stage::Game(game) => game.exiting(event_loop),
+        }
+    }
+}
+
+/// Opens Morizen's screen and runs the app until its window closes. The game, once started, takes
+/// over the same event loop.
+#[cfg(target_os = "android")]
+pub fn run(app: winit::platform::android::activity::AndroidApp) -> Result<(), String> {
+    use winit::platform::android::EventLoopBuilderExtAndroid;
+    let data = app
+        .internal_data_path()
+        .ok_or("Android did not provide an app data folder.")?;
+    let paths = Paths {
+        game: data.join("game"),
+        prepared: data.join("prepared").join(VERSION),
+    };
+    for folder in [&paths.game, &paths.prepared] {
+        std::fs::create_dir_all(folder).map_err(|e| format!("{}: {e}", folder.display()))?;
+    }
+    std::env::set_current_dir(&paths.game).map_err(|e| format!("{}: {e}", paths.game.display()))?;
+    let mut stage = Stage::Shell(Shell::new(paths));
+    let event_loop = winit::event_loop::EventLoop::builder()
+        .with_android_app(app)
+        .build()
+        .map_err(|e| e.to_string())?;
+    event_loop.set_control_flow(ControlFlow::Wait);
+    event_loop
+        .run_app(&mut stage)
+        .map_err(|e| format!("Morizen stopped: {e}"))
+}
