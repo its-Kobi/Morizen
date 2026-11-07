@@ -171,8 +171,8 @@ impl Shell {
         }
         if done {
             self.job = None;
+            self.needs_redraw = true;
         }
-        self.needs_redraw = true;
     }
 
     fn download(&mut self) {
@@ -299,9 +299,12 @@ impl Shell {
                     self.status = format!("{text:?} is not a Minecraft key name.");
                 } else {
                     let label = text.trim().to_ascii_uppercase();
-                    match self.layout.add_custom(&label, action) {
-                        Ok(button) => {
-                            let id = button.id.clone();
+                    let added = self
+                        .layout
+                        .add_custom(&label, action)
+                        .map(|button| button.id.clone());
+                    match added {
+                        Ok(id) => {
                             self.selected = Some(id);
                             self.save_layout();
                             self.status =

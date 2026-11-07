@@ -26,7 +26,7 @@ impl TouchControls {
     }
 
     #[allow(dead_code)] // Used by the touch-controls options editor as it lands.
-    pub fn save(&self) -> Result<(), String> {
+    pub fn save(&self) -> std::result::Result<(), String> {
         self.layout.save(&self.path)
     }
 
@@ -128,7 +128,7 @@ impl Game<'_> {
                 let Some(key) = horizon_client::keybinds::key_code(&name) else {
                     return Ok(());
                 };
-                let mapped: Vec<_> = self.settings.keys.translate_all(key).collect();
+                let mapped = self.settings.keys.translate_all(key);
                 for input in mapped {
                     match input {
                         Ok(key) => self.mapped_key(key, pressed, false)?,
