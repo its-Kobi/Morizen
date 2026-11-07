@@ -24,6 +24,7 @@ SPAWN_MARKERS = {
 # Scripts that mention those strings without starting a game themselves, and why.
 EXEMPT = {
     "lab.py": "defines game_env",
+    "java_mods_launcher.py": "sets up the player's own launcher on purpose, so their versions stay theirs",
     "parity.py": "runs the harnesses and gives each its own HORIZON_HOME",
     "package_native_client.py": "packs the binaries into an archive",
     "build_release.py": "builds and packs the release",

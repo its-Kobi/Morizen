@@ -1,12 +1,10 @@
-//! The Mods page's project page, search filters and project icons (`horizon_launcher::browser`:
+//! The Mods page's project page and project icons (`horizon_launcher::browser`:
 //! `details` for the data, `images` for the icons and gallery). Drawn only with the launcher's
 //! shared components, so a restyle of those restyles this.
 //!
 //! - A result's title opens its page inside the launcher: icon, author, downloads, followers,
 //!   licence, how well it runs and Install, then Description (Markdown), Gallery, Versions and
 //!   the project's links.
-//! - Filters: sort, loader, game version, environment and categories, with the values the
-//!   source lists for the kind.
 //! - Icons and gallery images come from the source's image servers at run time, cached on disk;
 //!   a placeholder stands in until one arrives.
 use super::mods_page::{Checking, Event};
@@ -14,10 +12,10 @@ use super::*;
 use gpui::img;
 use horizon_launcher::browser::{
     self,
-    details::{Details, Environment, Filters, Sort, Tags},
+    details::{Details, Filters},
     images, java, Kind as PackKind, Project, SourceId, Support, Version,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -52,14 +50,11 @@ pub(super) struct ProjectVersion {
     verdict: Option<horizon_port_pack::check::Verdict>,
 }
 
-/// The project page, filters and images' share of the Mods page's state.
+/// The project page and images' share of the Mods page's state.
 #[derive(Default)]
 pub(super) struct Browse {
     pub(super) open: Option<Opened>,
     pub(super) filters: Filters,
-    pub(super) show_filters: bool,
-    tags: HashMap<(SourceId, PackKind), Tags>,
-    tags_asked: HashSet<(SourceId, PackKind)>,
     /// Images on disk, by URL and size; `None` while they load or when they failed.
     images: HashMap<(String, u32), Option<PathBuf>>,
     image_queue: Option<std::sync::mpsc::Sender<(String, u32)>>,
@@ -75,7 +70,6 @@ pub(super) enum Loaded {
         horizon_port_pack::check::Verdict,
     ),
     Image((String, u32), Option<PathBuf>),
-    Tags((SourceId, PackKind), Result<Tags, String>),
 }
 
 /// Images fetched at once.
@@ -111,10 +105,6 @@ impl Launcher {
             Loaded::Image(key, path) => {
                 b.images.insert(key, path);
             }
-            Loaded::Tags(key, Ok(tags)) => {
-                b.tags.insert(key, tags);
-            }
-            Loaded::Tags(_, Err(_)) => {}
         }
     }
 
@@ -207,171 +197,6 @@ impl Launcher {
             .clone()
             .and_then(|url| self.mods_image(&url, images::ICON));
         blocks::slot(path.map(gpui::ImageSource::from), &p.title, side, &t).into_any_element()
-    }
-
-    /// The values the filters can take for the current kind and source, asked for once.
-    fn mods_tags(&mut self) -> Option<&Tags> {
-        let key = (self.mods.source, self.mods.kind);
-        if self.mods.browse.tags_asked.insert(key) {
-            let tx = self.mods.tx.clone();
-            std::thread::spawn(move || {
-                let tags = browser::source(key.0)
-                    .ok_or_else(|| "not set up".to_string())
-                    .and_then(|s| s.tags(key.1));
-                let _ = tx.send(Event::Loaded(Loaded::Tags(key, tags)));
-            });
-        }
-        self.mods.browse.tags.get(&key)
-    }
-
-    /// Sets the filters and searches again.
-    fn mods_filter(&mut self, change: impl FnOnce(&mut Filters)) {
-        change(&mut self.mods.browse.filters);
-        self.mods_search(0);
-    }
-
-    /// The filter bar: sort always; loader, version, environment and categories when shown.
-    pub(super) fn mods_filters(&mut self, cx: &mut Context<Self>) -> Div {
-        let t = self.theme;
-        let this = cx.entity().downgrade();
-        let f = self.mods.browse.filters.clone();
-        let sorts: Vec<(Option<Sort>, &'static str)> = std::iter::once((None, "Best match"))
-            .chain(Sort::ALL.iter().map(|s| (Some(*s), s.label())))
-            .collect();
-        let sort = segments("mods-sort", &sorts, f.sort, &t, {
-            let this = this.clone();
-            move |value, _, cx| {
-                let _ = this.update(cx, |this, cx| {
-                    this.mods_filter(|f| f.sort = value);
-                    cx.notify();
-                });
-            }
-        });
-        let shown = self.mods.browse.show_filters;
-        let active = f.categories.len()
-            + f.loader.is_some() as usize
-            + f.game_version.is_some() as usize
-            + f.environment.is_some() as usize;
-        let toggle = button(
-            "mods-filters",
-            if active > 0 {
-                format!("Filters ({active})")
-            } else {
-                "Filters".to_string()
-            },
-            if shown { Kind::Secondary } else { Kind::Ghost },
-            &t,
-        )
-        .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-            this.mods.browse.show_filters = !this.mods.browse.show_filters;
-            cx.notify();
-        }));
-        let mut bar = div().flex().flex_col().gap(px(12.)).child(
-            div()
-                .flex()
-                .flex_wrap()
-                .items_center()
-                .gap(px(12.))
-                .child(sort)
-                .child(toggle),
-        );
-        if !shown {
-            return bar;
-        }
-        let Some(tags) = self.mods_tags().cloned() else {
-            return bar.child(caps("Loading filters").text_color(t.muted));
-        };
-        // A chip: on or off, one value of a filter.
-        let chip = |id: String, label: String, on: bool| {
-            button(
-                id,
-                label,
-                if on { Kind::Secondary } else { Kind::Ghost },
-                &t,
-            )
-        };
-        let row = |title: &'static str| {
-            div()
-                .flex()
-                .flex_wrap()
-                .items_center()
-                .gap(px(4.))
-                .child(caps(title).text_color(t.muted).w(px(120.)))
-        };
-        let mut loaders = row("Loader");
-        for l in &tags.loaders {
-            let on = f.loader.as_deref() == Some(l.as_str());
-            let value = l.clone();
-            loaders = loaders.child(chip(format!("mods-loader-{l}"), l.clone(), on).on_click(
-                cx.listener(move |this, _: &ClickEvent, _, cx| {
-                    let v = value.clone();
-                    this.mods_filter(|f| f.loader = if on { None } else { Some(v) });
-                    cx.notify();
-                }),
-            ));
-        }
-        let mut versions = row("Game version");
-        if let Some(path) = self.vanilla_icon() {
-            versions = versions.child(img(path).size(px(20.)).flex_none());
-        }
-        for v in tags.game_versions.iter().take(12) {
-            let on = f.game_version.as_deref() == Some(v.as_str());
-            let value = v.clone();
-            versions = versions.child(chip(format!("mods-version-{v}"), v.clone(), on).on_click(
-                cx.listener(move |this, _: &ClickEvent, _, cx| {
-                    let v = value.clone();
-                    this.mods_filter(|f| f.game_version = if on { None } else { Some(v) });
-                    cx.notify();
-                }),
-            ));
-        }
-        let mut environment = row("Environment");
-        for e in Environment::ALL {
-            let on = f.environment == Some(e);
-            environment = environment.child(
-                chip(format!("mods-env-{}", e.label()), e.label().into(), on).on_click(
-                    cx.listener(move |this, _: &ClickEvent, _, cx| {
-                        this.mods_filter(|f| f.environment = if on { None } else { Some(e) });
-                        cx.notify();
-                    }),
-                ),
-            );
-        }
-        let mut categories = row("Categories");
-        for c in &tags.categories {
-            let on = f.categories.contains(&c.name);
-            let value = c.name.clone();
-            categories = categories.child(
-                chip(format!("mods-cat-{}", c.name), c.name.replace('-', " "), on).on_click(
-                    cx.listener(move |this, _: &ClickEvent, _, cx| {
-                        let v = value.clone();
-                        this.mods_filter(|f| {
-                            if !f.categories.contains(&v) {
-                                f.categories.push(v);
-                            } else {
-                                f.categories.retain(|x| *x != v);
-                            }
-                        });
-                        cx.notify();
-                    }),
-                ),
-            );
-        }
-        let clear = button("mods-clear", "Clear filters", Kind::Ghost, &t).on_click(cx.listener(
-            |this, _: &ClickEvent, _, cx| {
-                this.mods_filter(|f| *f = Filters::default());
-                cx.notify();
-            },
-        ));
-        bar = bar
-            .child(loaders)
-            .child(versions)
-            .child(environment)
-            .child(categories);
-        if active > 0 {
-            bar = bar.child(div().flex().child(clear));
-        }
-        bar
     }
 
     /// Vanilla's mark, drawn from the player's prepared game files when there are some.
