@@ -35,6 +35,10 @@ struct Paths {
     /// The prepared resource root: `assets/`, `data/` and, once the exporters have run,
     /// `horizon-resources.json`.
     prepared: PathBuf,
+    /// Where a computer-prepared folder can be dropped on Android (`adb push`): this device
+    /// cannot run the Java exporters itself, so a folder made on a computer is the way to play
+    /// before the download-and-prepare step exists here.
+    imported: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -107,6 +111,13 @@ impl Shell {
                 "Minecraft's files are not on this device yet. Downloading needs a Microsoft \
                  account that owns Minecraft: Java Edition, and about 1 GB of free space.",
             );
+            if let Some(imported) = &paths.imported {
+                status.push_str(&format!(
+                    " To play now, prepare them on a computer (horizon-prepare --prepare) and copy \
+                     the {VERSION} folder to {}.",
+                    imported.display()
+                ));
+            }
         } else {
             status.push_str("Minecraft's files are ready on this device.");
         }
@@ -765,11 +776,29 @@ pub fn run(app: winit::platform::android::activity::AndroidApp) -> Result<(), St
     let data = app
         .internal_data_path()
         .ok_or("Android did not provide an app data folder.")?;
+    let downloaded = data.join("prepared").join(VERSION);
+    // A folder prepared on a computer wins when it is complete: this device cannot run the game's
+    // Java exporters, so that copy is the only way to play before the download does more.
+    let imported = app
+        .external_data_path()
+        .map(|dir| dir.join("prepared").join(VERSION));
+    let prepared = match &imported {
+        Some(folder) if folder.join("horizon-resources.json").is_file() => folder.clone(),
+        _ => downloaded,
+    };
     let paths = Paths {
         game: data.join("game"),
-        prepared: data.join("prepared").join(VERSION),
+        prepared,
+        imported,
     };
-    for folder in [&paths.game, &paths.prepared] {
+    for folder in [
+        Some(&paths.game),
+        Some(&paths.prepared),
+        paths.imported.as_ref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
         std::fs::create_dir_all(folder).map_err(|e| format!("{}: {e}", folder.display()))?;
     }
     std::env::set_current_dir(&paths.game).map_err(|e| format!("{}: {e}", paths.game.display()))?;
