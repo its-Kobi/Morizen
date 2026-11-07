@@ -246,7 +246,7 @@ impl Layout {
 }
 
 fn finite(value: f32, fallback: f32) -> f32 {
-    value.is_finite().then_some(value).unwrap_or(fallback)
+    if value.is_finite() { value } else { fallback }
 }
 
 fn plain(value: &str, max: usize) -> String {
