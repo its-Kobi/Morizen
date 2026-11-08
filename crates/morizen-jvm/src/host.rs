@@ -332,14 +332,9 @@ fn owner_thread(
         return Ok(());
     }
 
-    loop {
-        match commands.recv() {
-            Ok(Command::Dispatch(batch, reply)) => {
-                let result = vm.attach_current_thread(|env| dispatch_loader(env, &config, &batch));
-                let _ = reply.send(result);
-            }
-            Ok(Command::Shutdown) | Err(_) => break,
-        }
+    while let Ok(Command::Dispatch(batch, reply)) = commands.recv() {
+        let result = vm.attach_current_thread(|env| dispatch_loader(env, &config, &batch));
+        let _ = reply.send(result);
     }
     println!("morizen-java: shutdown begin");
     let stop = EventBatch::single(BridgeEvent::new(
@@ -611,9 +606,10 @@ fn destroy_vm(vm: jni::JavaVM) -> Result<()> {
     // SAFETY: this is the sole owner thread; Java callbacks have returned, the
     // bootstrap has dropped its target-loader reference, and no JNI reference
     // wrapper is retained outside the completed attachment closures above.
-    let result = unsafe { vm.destroy() }.map_err(BridgeError::from);
-    drop(vm);
-    result
+    //
+    // `JavaVM` has no destructor: `destroy` is the whole cleanup, so letting the
+    // handle leave scope afterwards is the same as dropping it.
+    unsafe { vm.destroy() }.map_err(BridgeError::from)
 }
 
 #[cfg(windows)]
