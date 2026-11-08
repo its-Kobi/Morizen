@@ -16173,6 +16173,7 @@ pub fn run() -> Result<()> {
 /// The game as the Android shell runs it: on the event loop the shell created, because winit
 /// allows only one loop per process. The shell swaps itself out for this handler on Play.
 #[cfg(feature = "android-game")]
+#[allow(dead_code)] // The desktop binary never constructs it; only the Android shell crate does.
 pub struct AndroidGame {
     app: App,
 }
@@ -16180,6 +16181,7 @@ pub struct AndroidGame {
 #[cfg(feature = "android-game")]
 impl AndroidGame {
     /// The same launch as [`run`], with the resources and name the shell holds.
+    #[allow(dead_code)] // Called by the Android shell crate, not by this binary.
     pub fn start(resources: PathBuf, name: String) -> Result<Self> {
         *ANDROID_LAUNCH.lock().unwrap() = Some((resources, Some(name)));
         let prepared = prepare()?.ok_or("Morizen's shell launched without a game request.")?;

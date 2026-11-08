@@ -657,7 +657,7 @@ impl Shell {
         let selected = self
             .selected
             .as_deref()
-            .and_then(|id| self.layout.buttons.iter().find(|button| &button.id == id));
+            .and_then(|id| self.layout.buttons.iter().find(|button| button.id == id));
         let hint = match selected {
             Some(button) => format!(
                 "{} SELECTED  SIZE {:.2}  DRAG TO MOVE",
@@ -964,6 +964,15 @@ pub fn run(app: winit::platform::android::activity::AndroidApp) -> Result<(), St
                 .join(package)
                 .join("files/prepared"),
         );
+    }
+    // Removable cards mount under /storage/<id>; look for the usual folders beside that mount.
+    if let Ok(cards) = std::fs::read_dir("/storage") {
+        for card in cards.flatten() {
+            let base = card.path();
+            for name in ["Download", "Documents", "Morizen", "horizon-client"] {
+                search.push(base.join(name));
+            }
+        }
     }
     let paths = Paths {
         game: data.join("game"),
