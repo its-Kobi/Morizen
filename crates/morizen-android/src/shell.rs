@@ -225,7 +225,7 @@ impl Shell {
             if thorough {
                 self.scan(4, 3000)
             } else {
-                self.scan(2, 400)
+                self.scan(4, 800)
             }
         });
         match found {
@@ -991,4 +991,60 @@ pub fn run(app: winit::platform::android::activity::AndroidApp) -> Result<(), St
     event_loop
         .run_app(&mut stage)
         .map_err(|e| format!("Morizen stopped: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A prepared folder copied in a desktop checkout's layout, under Download, is adopted on
+    /// startup even though it is a few levels deep; the game then launches from that root.
+    #[test]
+    fn finds_a_prepared_folder_in_a_nested_search_root() {
+        let dir = std::env::temp_dir().join(format!(
+            "morizen-shell-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let root = dir
+            .join("Download")
+            .join("Morizen")
+            .join(".local")
+            .join("horizon-client")
+            .join(VERSION);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(MANIFEST), b"{}").unwrap();
+        let paths = Paths {
+            game: dir.join("game"),
+            prepared: dir.join("nothing-here"),
+            imported: None,
+            search: vec![dir.join("Download")],
+        };
+        let shell = Shell::new(paths);
+        assert_eq!(shell.paths.prepared, root);
+        assert!(shell.status.contains("Tap PLAY"), "{}", shell.status);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Raw Mojang files are reported as downloaded but unprepared, not as absent.
+    #[test]
+    fn reports_a_raw_download_as_unprepared() {
+        let dir = std::env::temp_dir().join(format!("morizen-shell-raw-{}", std::process::id()));
+        let prepared = dir.join("prepared").join(VERSION);
+        std::fs::create_dir_all(prepared.join("assets").join("indexes")).unwrap();
+        let paths = Paths {
+            game: dir.join("game"),
+            prepared: prepared.clone(),
+            imported: Some(dir.join("external").join(VERSION)),
+            search: Vec::new(),
+        };
+        let shell = Shell::new(paths);
+        assert_eq!(shell.paths.prepared, prepared);
+        assert!(
+            shell.status.contains("are on this device"),
+            "{}",
+            shell.status
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
