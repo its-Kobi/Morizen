@@ -404,7 +404,7 @@ fn hex_encode(bytes: &[u8]) -> String {
 }
 
 fn hex_text(text: &str) -> Result<String, String> {
-    if !text.len().is_multiple_of(2) {
+    if text.len() % 2 != 0 {
         return Err("hex text has an odd length".into());
     }
     let mut bytes = Vec::with_capacity(text.len() / 2);

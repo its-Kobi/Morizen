@@ -9,7 +9,8 @@
 use crate::gfx2d::{Gfx, Painter, Rect};
 use crate::manifest::{self, Phase, Progress};
 use horizon_client::touch::{Action, Layout};
-use std::path::PathBuf;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Mutex};
 use winit::application::ApplicationHandler;
@@ -39,7 +40,13 @@ struct Paths {
     /// cannot run the Java exporters itself, so a folder made on a computer is the way to play
     /// before the download-and-prepare step exists here.
     imported: Option<PathBuf>,
+    /// Every folder worth looking through for a prepared `26.3` root the player already has:
+    /// shared storage, Download, this app's old data folders and the previous package's.
+    search: Vec<PathBuf>,
 }
+
+/// The file that makes a folder a prepared game root (`horizon-prepare`'s output).
+const MANIFEST: &str = "horizon-resources.json";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Page {
@@ -51,6 +58,7 @@ enum Page {
 enum Act {
     Download,
     Play,
+    Search,
     Controls,
     Back,
     Name,
@@ -105,28 +113,12 @@ impl Shell {
             .map(|name| name.trim().to_owned())
             .filter(|name| (3..=16).contains(&name.len()))
             .unwrap_or_else(|| "Player".to_owned());
-        let mut status = String::new();
-        if Self::missing(&paths) {
-            status.push_str(
-                "Minecraft's files are not on this device yet. Downloading needs a Microsoft \
-                 account that owns Minecraft: Java Edition, and about 1 GB of free space.",
-            );
-            if let Some(imported) = &paths.imported {
-                status.push_str(&format!(
-                    " To play now, prepare them on a computer (horizon-prepare --prepare) and copy \
-                     the {VERSION} folder to {}.",
-                    imported.display()
-                ));
-            }
-        } else {
-            status.push_str("Minecraft's files are ready on this device.");
-        }
-        Self {
+        let mut shell = Self {
             window: None,
             gfx: None,
             paths,
             page: Page::Home,
-            status,
+            status: String::new(),
             layout: Layout::load(&layout_path),
             layout_path,
             name,
@@ -139,11 +131,144 @@ impl Shell {
             selected: None,
             needs_redraw: true,
             launch: false,
+        };
+        shell.discover(false);
+        shell
+    }
+
+    fn is_prepared(root: &Path) -> bool {
+        root.join(MANIFEST).is_file()
+    }
+
+    /// Whether this root holds Mojang's download but not the tables the Rust game needs, which
+    /// happens when a player downloaded in an earlier build: say so instead of "nothing here".
+    fn has_raw_download(root: &Path) -> bool {
+        root.join("versions")
+            .join(VERSION)
+            .join(format!("{VERSION}.jar"))
+            .is_file()
+            || root.join("assets/indexes").is_dir()
+    }
+
+    /// Takes `folder` as the resource root and remembers it for the next launch.
+    fn adopt(&mut self, folder: &Path) {
+        if self.paths.prepared == folder {
+            return;
+        }
+        self.paths.prepared = folder.to_path_buf();
+        let record = self.paths.game.join("prepared-path.txt");
+        let _ = std::fs::write(record, folder.to_string_lossy().as_bytes());
+    }
+
+    /// Looks for a prepared root the player already has. `thorough` also opens subfolders (a
+    /// desktop checkout's `.local/horizon-client/26.3`, for instance); the quick pass keeps
+    /// startup short.
+    fn scan(&self, depth: u32, budget: usize) -> Option<PathBuf> {
+        let mut seen = HashSet::new();
+        let mut left = budget;
+        for root in std::iter::once(&self.paths.prepared).chain(self.paths.search.iter()) {
+            let mut found = None;
+            Self::walk(root, depth, &mut left, &mut seen, &mut found);
+            if found.is_some() {
+                return found;
+            }
+            if left == 0 {
+                break;
+            }
+        }
+        None
+    }
+
+    fn walk(
+        dir: &Path,
+        depth: u32,
+        left: &mut usize,
+        seen: &mut HashSet<PathBuf>,
+        found: &mut Option<PathBuf>,
+    ) {
+        if found.is_some() || *left == 0 {
+            return;
+        }
+        if !seen.insert(dir.to_path_buf()) {
+            return;
+        }
+        *left -= 1;
+        if Self::is_prepared(dir) {
+            *found = Some(dir.to_path_buf());
+            return;
+        }
+        if depth == 0 {
+            return;
+        }
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            if found.is_some() || *left == 0 {
+                return;
+            }
+            let path = entry.path();
+            if path.is_dir() {
+                Self::walk(&path, depth - 1, left, seen, found);
+            }
         }
     }
 
-    fn missing(paths: &Paths) -> bool {
-        !paths.prepared.join("horizon-resources.json").is_file()
+    /// Finds a prepared root on this device, if there is one, and updates the status for it.
+    /// The quick pass runs at startup; Search runs the thorough one.
+    fn discover(&mut self, thorough: bool) -> bool {
+        let remembered = std::fs::read_to_string(self.paths.game.join("prepared-path.txt"))
+            .ok()
+            .map(|saved| PathBuf::from(saved.trim()))
+            .filter(|folder| Self::is_prepared(folder));
+        let found = remembered.or_else(|| {
+            if thorough {
+                self.scan(4, 3000)
+            } else {
+                self.scan(2, 400)
+            }
+        });
+        match found {
+            Some(folder) => {
+                self.adopt(&folder);
+                self.status = format!(
+                    "Found Minecraft {VERSION} (Rust edition) at {}. Tap PLAY.",
+                    folder.display()
+                );
+                true
+            }
+            None => {
+                self.status = self.missing_status();
+                false
+            }
+        }
+    }
+
+    fn missing_status(&self) -> String {
+        let raw = Self::has_raw_download(&self.paths.prepared)
+            || self
+                .paths
+                .imported
+                .as_deref()
+                .is_some_and(Self::has_raw_download);
+        let mut text = if raw {
+            format!(
+                "Mojang's Minecraft {VERSION} files are on this device, but the Rust game still \
+                 needs the prepared tables that horizon-prepare writes (horizon-resources.json)."
+            )
+        } else {
+            format!("Minecraft {VERSION} (Rust edition) was not found on this device yet.")
+        };
+        if let Some(imported) = &self.paths.imported {
+            text.push_str(&format!(
+                " Copy a prepared {VERSION} folder (the one with horizon-resources.json) to {}",
+                imported.display()
+            ));
+        } else {
+            text.push_str(" Copy a prepared 26.3 folder (the one with horizon-resources.json) to this app's files");
+        }
+        text.push_str(", or anywhere under Download, then tap SEARCH DEVICE.");
+        text
     }
 
     fn poll_job(&mut self) {
@@ -161,9 +286,9 @@ impl Shell {
                     self.progress = None;
                     self.status = format!(
                         "Minecraft {VERSION} is downloaded: {files} files from Mojang's client jar \
-                         and {assets} assets, all checked against their SHA-1. The prepared game \
-                         data still has to be built from them, which needs the exporter step that \
-                         is not on Android yet."
+                         and {assets} assets, all checked against their SHA-1. The Rust game also \
+                         needs the prepared tables (horizon-resources.json) that horizon-prepare \
+                         writes on a computer: copy that folder here, or tap SEARCH DEVICE."
                     );
                     done = true;
                 }
@@ -221,16 +346,22 @@ impl Shell {
                 self.save_layout();
             }
             Act::Play => {
-                if Self::missing(&self.paths) {
-                    self.status = "Play needs the prepared game data. Downloading Minecraft's \
-                                   files is the first step; the exporter step is still missing on \
-                                   Android."
-                        .to_owned();
-                } else {
+                if Self::is_prepared(&self.paths.prepared) {
                     self.launch = true;
-                    self.status = "Starting Minecraft…".to_owned();
+                    self.status = "Starting Morizen 26.3 (Rust edition)...".to_owned();
+                    self.needs_redraw = true;
+                } else if self.discover(true) {
+                    self.launch = true;
+                    self.needs_redraw = true;
+                } else {
                     self.needs_redraw = true;
                 }
+            }
+            Act::Search => {
+                self.status =
+                    format!("Searching this device for a prepared Minecraft {VERSION}...");
+                self.needs_redraw = true;
+                self.discover(true);
             }
             Act::Name => self.begin_edit(Field::Name),
             Act::SizeDown => self.resize_layout(-1.0),
@@ -395,7 +526,7 @@ impl Shell {
         painter.text_centered(
             w / 2.0,
             h * 0.04 + 12.0 * ui,
-            "MINECRAFT JAVA 26.3 FOR ANDROID",
+            "MINECRAFT 26.3 RUST EDITION",
             2.4 * ui,
             ACCENT,
         );
@@ -455,7 +586,7 @@ impl Shell {
             y,
             bw,
             bh,
-            "DOWNLOAD GAME FILES",
+            "DOWNLOAD MOJANG FILES",
             Act::Download,
             !downloading,
         );
@@ -471,8 +602,20 @@ impl Shell {
             true,
         );
         y += bh + gap;
-        let playable = !Self::missing(&self.paths);
-        self.button(painter, bx, y, bw, bh, "PLAY", Act::Play, playable);
+        if Self::is_prepared(&self.paths.prepared) {
+            self.button(painter, bx, y, bw, bh, "PLAY", Act::Play, true);
+        } else {
+            self.button(
+                painter,
+                bx,
+                y,
+                bw,
+                bh,
+                "SEARCH DEVICE FOR 26.3",
+                Act::Search,
+                !downloading,
+            );
+        }
         y += bh + gap;
         let name = format!("PLAYER: {}", self.name.to_ascii_uppercase());
         self.button(painter, bx, y, bw, 7.0 * ui, &name, Act::Name, !downloading);
@@ -779,17 +922,54 @@ pub fn run(app: winit::platform::android::activity::AndroidApp) -> Result<(), St
     let downloaded = data.join("prepared").join(VERSION);
     // A folder prepared on a computer wins when it is complete: this device cannot run the game's
     // Java exporters, so that copy is the only way to play before the download does more.
-    let imported = app
-        .external_data_path()
+    let external = app.external_data_path();
+    let imported = external
+        .as_ref()
         .map(|dir| dir.join("prepared").join(VERSION));
     let prepared = match &imported {
-        Some(folder) if folder.join("horizon-resources.json").is_file() => folder.clone(),
+        Some(folder) if folder.join(MANIFEST).is_file() => folder.clone(),
         _ => downloaded,
     };
+    // Shared storage and app data folders a downloaded or copied 26.3 can plausibly live in. The
+    // previous package name is here too: an older build's files may still be on the device.
+    let mut search = Vec::new();
+    if let Some(dir) = &external {
+        search.push(dir.join("prepared"));
+        search.push(dir.clone());
+    }
+    for base in ["/sdcard", "/storage/emulated/0"] {
+        let base = PathBuf::from(base);
+        for name in [
+            "Download",
+            "Documents",
+            "Morizen",
+            "morizen",
+            "horizon-client",
+            "games",
+        ] {
+            search.push(base.join(name));
+        }
+        for package in ["com.morizen.app", "dev.morizen.mobile"] {
+            search.push(
+                base.join("Android/data")
+                    .join(package)
+                    .join("files/prepared"),
+            );
+            search.push(base.join("Android/data").join(package).join("files"));
+        }
+    }
+    for package in ["com.morizen.app", "dev.morizen.mobile"] {
+        search.push(
+            PathBuf::from("/data/user/0")
+                .join(package)
+                .join("files/prepared"),
+        );
+    }
     let paths = Paths {
         game: data.join("game"),
         prepared,
         imported,
+        search,
     };
     for folder in [
         Some(&paths.game),

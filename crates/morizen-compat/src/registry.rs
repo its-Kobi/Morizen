@@ -436,12 +436,14 @@ fn texture_color(id: &str) -> [u8; 4] {
 /// A minimal, valid 8-bit RGBA PNG with stored (uncompressed) deflate blocks.
 /// Textures are generated, never copied from Mojang's assets.
 pub fn png_solid(width: u32, height: u32, rgba: [u8; 4]) -> Vec<u8> {
-    let mut raw = Vec::with_capacity((width as usize * 4 + 1) * height as usize);
+    let mut row = Vec::with_capacity(width as usize * 4 + 1);
+    row.push(0); // filter: none
+    for _ in 0..width {
+        row.extend_from_slice(&rgba);
+    }
+    let mut raw = Vec::with_capacity(row.len() * height as usize);
     for _ in 0..height {
-        raw.push(0); // filter: none
-        for _ in 0..width {
-            raw.extend_from_slice(&rgba);
-        }
+        raw.extend_from_slice(&row);
     }
     let mut zlib = vec![0x78, 0x01];
     let mut offset = 0;

@@ -49,6 +49,11 @@ name = "android.permission.INTERNET"
 [[package.metadata.android.uses_permission]]
 name = "android.permission.ACCESS_NETWORK_STATE"
 
+# Reading a prepared 26.3 folder the player copied into Download or an older app's data. Android
+# 11+ hides those from ordinary apps; the player grants "All files access" in Settings once.
+[[package.metadata.android.uses_permission]]
+name = "android.permission.MANAGE_EXTERNAL_STORAGE"
+
 [[package.metadata.android.uses_feature]]
 name = "android.hardware.touchscreen"
 required = true
@@ -59,7 +64,7 @@ required = true
 version = 1
 
 [package.metadata.android.application]
-label = "Morizen"
+label = "Morizen 26.3 Rust"
 theme = "@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen"
 
 [package.metadata.android.application.activity]
