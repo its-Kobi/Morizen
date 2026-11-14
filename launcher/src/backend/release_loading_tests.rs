@@ -107,7 +107,8 @@ fn publish_games_before_older_launcher_fallback() {
                     Ok(
                         serde_json::json!({"tag_name": "launcher@99.0.0", "assets": [{
                             "name": LAUNCHER_ASSET.unwrap_or("unsupported"),
-                            "browser_download_url": "u", "size": 1
+                            "browser_download_url":
+                                "https://example.test/morizen-launcher-unsupported", "size": 1
                         }]}),
                     )
                 }

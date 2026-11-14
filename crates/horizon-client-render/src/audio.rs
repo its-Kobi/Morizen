@@ -140,8 +140,11 @@ fn attach(mixer: &Mutex<Mixer>, channel: ChannelId, samples: Samples, looping: b
 /// need libasound) never has one.
 #[cfg(feature = "audio")]
 type Stream = cpal::Stream;
+// A build without the `audio` feature never opens a stream (the server build), but the type stays
+// inhabited: an uninhabited one makes the `Ok` arm of the caller unreachable, which `-D warnings`
+// rejects. It is never constructed.
 #[cfg(not(feature = "audio"))]
-type Stream = std::convert::Infallible;
+type Stream = ();
 pub struct Audio {
     _stream: Option<Stream>,
     device_name: String,

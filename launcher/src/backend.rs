@@ -3937,7 +3937,7 @@ mod tests {
     #[test]
     fn the_fallback_looks_for_0_2_launchers_first() {
         let asset = LAUNCHER_ASSET.unwrap_or("unsupported");
-        let release = |tag: &str| serde_json::json!({"tag_name": tag, "assets": [{"name": asset, "browser_download_url": "u", "size": 1}]});
+        let release = |tag: &str| serde_json::json!({"tag_name": tag, "assets": [{"name": asset, "browser_download_url": "https://example.test/morizen-launcher-unsupported", "size": 1}]});
         let asked = std::cell::RefCell::new(Vec::new());
         let lookup = |with_new: bool| {
             asked.borrow_mut().clear();
