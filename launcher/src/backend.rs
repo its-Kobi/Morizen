@@ -416,6 +416,29 @@ fn launcher_releases_in_with(
     list: &serde_json::Value,
     json: impl Fn(String) -> Result<serde_json::Value, String>,
 ) -> Vec<Release> {
+    let mut found = launcher_releases_in_any(list, json);
+    // Only Morizen's own builds: this fork's GitHub page can still list upstream Horizon's
+    // launcher releases, and those must never be offered (or installed) in Morizen's place.
+    found.retain(|r| {
+        r.asset
+            .as_ref()
+            .is_some_and(|(url, _)| morizen_launcher_asset(url))
+    });
+    found
+}
+
+/// Whether a release archive is one Morizen built (`morizen-launcher-<platform>`), rather than an
+/// upstream Horizon launcher build.
+fn morizen_launcher_asset(url: &str) -> bool {
+    url.rsplit('/')
+        .next()
+        .is_some_and(|name| name.starts_with("morizen-launcher-"))
+}
+
+fn launcher_releases_in_any(
+    list: &serde_json::Value,
+    json: impl Fn(String) -> Result<serde_json::Value, String>,
+) -> Vec<Release> {
     let found = parse_releases(list, LAUNCHER_ASSET, |tag| {
         is_launcher_tag(tag) || tag == LAUNCHER_RELEASE_TAG
     });
@@ -2715,6 +2738,9 @@ pub fn self_update(release: &Release, progress: impl Fn(f32)) -> Result<(), Stri
         .asset
         .clone()
         .ok_or("This launcher release has no build for this platform.")?;
+    if !morizen_launcher_asset(&url) {
+        return Err("That is not a Morizen launcher build; refusing to install it.".into());
+    }
     let target = launcher_version(&release.tag).unwrap_or("0");
     if installed_launcher_version(exe_path())
         .is_some_and(|v| v != VERSION && compare_versions(&v, target).is_ge())
@@ -3787,7 +3813,7 @@ mod tests {
                 "body": "<!-- morizen-build: abcdef123456 -->",
                 "assets": [{
                     "name": archive,
-                    "browser_download_url": "https://example.test/launcher.zip",
+                    "browser_download_url": "https://example.test/morizen-launcher.zip",
                     "size": 1
                 }]
             }]);
@@ -3795,6 +3821,15 @@ mod tests {
             assert_eq!(found.len(), 1);
             assert_eq!(found[0].tag, LAUNCHER_RELEASE_TAG);
             assert!(found[0].asset.is_some());
+            // An upstream Horizon launcher archive, even on this fork's release page, is never
+            // offered: Morizen only self-updates to its own builds.
+            let mut list = list;
+            list[0]["assets"][0] = serde_json::json!({
+                "name": "horizon-launcher",
+                "browser_download_url": "https://example.test/horizon-launcher",
+                "size": 1
+            });
+            assert!(launcher_releases_in_with(&list, |_| panic!("no fallback needed")).is_empty());
         }
     }
 

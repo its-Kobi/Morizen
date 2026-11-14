@@ -6,16 +6,18 @@
 
 use crate::pyjson::{self, Value};
 use crate::{digest, read_json, relative_display, write_json, Log};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::time::{Duration, Instant};
 
 const LAUNCHER_HINT: &str =
     "Horizon does not download the game: play {version} once in the launcher you play \
 Minecraft Java Edition with so it downloads the game's files, then rerun. Horizon reads the \
-official launcher's folder, ATLauncher's and the CurseForge app's; for Prism Launcher, MultiMC, \
-the Modrinth App or GDLauncher, prepare from the Horizon launcher, which finds their files. If your launcher keeps \
-them in another folder, pass --minecraft-dir or set HORIZON_MINECRAFT_DIR.";
+official launcher's folder and every other launcher's it knows (ATLauncher, Prism Launcher, \
+MultiMC, the Modrinth App, GDLauncher, the CurseForge app, TLauncher and SKLauncher), then \
+searches the computer for the version; if your launcher keeps them somewhere unusual, pass \
+--minecraft-dir or set HORIZON_MINECRAFT_DIR.";
 const SERVER_HINT: &str = "Horizon does not download the game: download the {version} server jar yourself (minecraft.net/download/server \
 while {version} is the current release, otherwise the downloads.server.url in your launcher's \
 versions/{version}/{version}.json), then pass --server-jar PATH or set HORIZON_SERVER_JAR.";
@@ -157,10 +159,11 @@ impl GameFiles {
     }
 }
 
-/// The layouts horizon-prepare reads in `folder`: the official launcher's, then ATLauncher's,
-/// which saves Mojang's version JSON as is in `configs/json/minecraft` and the client jar as
-/// the library `net.minecraft:client:<version>`.
-fn layouts(folder: &Path, version: &str) -> [GameFiles; 2] {
+/// The layouts horizon-prepare reads in `folder`: the official launcher's (which most launchers
+/// share), Prism Launcher's and MultiMC's client jar under `libraries/com/mojang/minecraft`, and
+/// ATLauncher's, which saves Mojang's version JSON as is in `configs/json/minecraft` and the
+/// client jar as the library `net.minecraft:client:<version>`.
+fn layouts(folder: &Path, version: &str) -> Vec<GameFiles> {
     let files = |manifest: String, client: String, runtimes: &str| GameFiles {
         folder: folder.to_path_buf(),
         manifest: folder.join(manifest),
@@ -169,10 +172,16 @@ fn layouts(folder: &Path, version: &str) -> [GameFiles; 2] {
         searched: Vec::new(),
     };
     let v = version;
-    [
+    vec![
         files(
             format!("versions/{v}/{v}.json"),
             format!("versions/{v}/{v}.jar"),
+            "runtime",
+        ),
+        // Prism Launcher and MultiMC name the vanilla jar after its Maven coordinate.
+        files(
+            format!("versions/{v}/{v}.json"),
+            format!("libraries/com/mojang/minecraft/{v}/minecraft-{v}-client.jar"),
             "runtime",
         ),
         files(
@@ -212,6 +221,21 @@ fn launcher_folders() -> Vec<(&'static str, PathBuf)> {
         vec![data.join("atlauncher"), flatpak.join("atlauncher"), flatpak]
     };
     folders.extend(atlauncher.into_iter().map(|dir| ("ATLauncher", dir)));
+    // Prism Launcher, MultiMC, the Modrinth App (and its old name) and GDLauncher store the
+    // vanilla jar under their own libraries; the official layout above still names the version JSON.
+    let data = std::env::var_os("APPDATA")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("XDG_DATA_HOME").map(PathBuf::from))
+        .unwrap_or_else(|| home().join(".local/share"));
+    folders.push(("Prism Launcher", data.join("PrismLauncher")));
+    folders.push(("MultiMC", data.join("multimc")));
+    folders.push(("Modrinth App", data.join("ModrinthApp")));
+    folders.push(("Modrinth App", data.join("com.modrinth.theseus")));
+    folders.push(("GDLauncher", data.join("gdlauncher_carbon")));
+    // TLauncher, SKLauncher and a hand-copied `.minecraft` may sit in the home folder rather than
+    // in the official launcher's place; the bounded search below catches every other folder.
+    folders.push(("a launcher", home().join(".minecraft")));
+    folders.push(("SKLauncher", home().join(".sklauncher")));
     let curseforge = if cfg!(windows) { "" } else { "Documents" };
     folders.push((
         "the CurseForge app",
@@ -231,15 +255,18 @@ pub fn game_files(chosen: Option<&Path>, version: &str) -> GameFiles {
         .or_else(|| std::env::var_os("HORIZON_MINECRAFT_DIR").map(PathBuf::from))
         .filter(|d| !d.as_os_str().is_empty())
         .map(|d| expand_user(&d));
-    let folders = match chosen {
+    let folders = match &chosen {
         Some(dir) => {
             let launcher = dir
                 .ancestors()
                 .find(|a| a.file_name().is_some_and(|n| n == "instances"))
                 .and_then(Path::parent)
                 .map(Path::to_path_buf);
-            let mut folders = vec![("the folder chosen", dir)];
+            let mut folders = vec![("the folder chosen", dir.clone())];
             folders.extend(launcher.map(|dir| ("the launcher above it", dir)));
+            // A folder chosen long ago, or one picked for a different launcher, may be stale:
+            // every launcher's usual folder is still looked in, and then the computer is.
+            folders.extend(launcher_folders());
             folders
         }
         None => launcher_folders(),
@@ -247,18 +274,176 @@ pub fn game_files(chosen: Option<&Path>, version: &str) -> GameFiles {
     // A folder with both files first: a version JSON left without its jar is used, for the
     // error to name the jar, only when no folder has both.
     let complete = |files: &GameFiles| files.manifest.is_file() && files.client.is_file();
-    let partial = |files: &GameFiles| files.manifest.is_file();
-    for found in [complete, partial] {
-        let mut all = folders
+    let known = |found: &dyn Fn(&GameFiles) -> bool| {
+        folders
             .iter()
-            .flat_map(|(_, folder)| layouts(folder, version));
-        if let Some(files) = all.find(found) {
+            .flat_map(|(_, folder)| layouts(folder, version))
+            .find(found)
+    };
+    if let Some(files) = known(&complete) {
+        return files;
+    }
+    // No folder Horizon knows holds the pinned version: look for it anywhere on the computer,
+    // cheaply and time-boxed (`scan_for_version`), so a launcher installed somewhere else works.
+    if let Some(folder) = scan_for_version(version) {
+        if let Some(files) = layouts(&folder, version)
+            .into_iter()
+            .find(|files| complete(files))
+        {
             return files;
         }
     }
-    let [mut files, _] = layouts(&folders[0].1, version);
+    if let Some(files) = known(&|files: &GameFiles| files.manifest.is_file()) {
+        return files;
+    }
+    let mut files = layouts(&folders[0].1, version).remove(0);
     files.searched = folders;
     files
+}
+
+/// How long the whole-computer look may take, and how many folders it may open: long enough to
+/// find a launcher installed anywhere, short enough that missing files never stall the launcher.
+const SEARCH_TIME: Duration = Duration::from_secs(3);
+const SEARCH_FOLDERS: usize = 40_000;
+
+/// Folder names that never hold a launcher's game folder and are slow to walk.
+const SKIPPED: [&str; 16] = [
+    "windows",
+    "program files",
+    "program files (x86)",
+    "programdata",
+    "$recycle.bin",
+    "system volume information",
+    "node_modules",
+    ".git",
+    "target",
+    ".cargo",
+    ".rustup",
+    "steamapps",
+    "temp",
+    "tmp",
+    "cache",
+    "caches",
+];
+
+/// Whether `dir` is a launcher's game folder holding `version`, as any of the layouts does.
+fn holds_version(dir: &Path, version: &str) -> bool {
+    let v = version;
+    [
+        format!("versions/{v}/{v}.json"),
+        format!("versions/{v}/{v}.jar"),
+        format!("libraries/com/mojang/minecraft/{v}/minecraft-{v}-client.jar"),
+        format!("libraries/net/minecraft/client/{v}/client-{v}.jar"),
+        format!("configs/json/minecraft/{v}.json"),
+    ]
+    .iter()
+    .any(|name| dir.join(name).is_file())
+}
+
+/// Where the bounded search starts: the home folder (where most launchers keep their game
+/// folder) and then each fixed drive, a few levels deep.
+fn search_roots() -> Vec<(PathBuf, u32)> {
+    let mut roots = vec![(home(), 6)];
+    if cfg!(windows) {
+        // Each mounted drive, a few levels down: `D:\Games\<launcher>\.minecraft` is common.
+        for letter in b'C'..=b'Z' {
+            let root = PathBuf::from(format!("{}:\\", letter as char));
+            if root.is_dir() && root != home() {
+                roots.push((root, 4));
+            }
+        }
+    } else {
+        for root in ["/home", "/mnt", "/media", "/opt", "/srv", "/data", "/"] {
+            let root = PathBuf::from(root);
+            if root.is_dir() {
+                roots.push((root, 4));
+            }
+        }
+    }
+    roots
+}
+
+/// Looks for `version` anywhere on this computer, without reading the whole disk: the walk is
+/// depth-limited, skips system and build folders, opens promising names (a folder called like a
+/// launcher, `instances`, `games`) first, stops after [`SEARCH_TIME`] or [`SEARCH_FOLDERS`]
+/// folders, and checks each folder for the version's files before descending.
+pub fn scan_for_version(version: &str) -> Option<PathBuf> {
+    let deadline = Instant::now() + SEARCH_TIME;
+    let mut left = SEARCH_FOLDERS;
+    let mut seen = HashSet::new();
+    for (root, depth) in search_roots() {
+        if let Some(found) = walk_for_version(&root, depth, version, deadline, &mut left, &mut seen)
+        {
+            return Some(found);
+        }
+        if left == 0 || Instant::now() >= deadline {
+            break;
+        }
+    }
+    None
+}
+
+/// Whether a folder's name suggests a launcher or its game folder, so it is opened first.
+fn promising(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    name.contains("minecraft")
+        || name.contains("launcher")
+        || name.contains("game")
+        || name.contains("instance")
+        || name.contains("prism")
+}
+
+fn walk_for_version(
+    dir: &Path,
+    depth: u32,
+    version: &str,
+    deadline: Instant,
+    left: &mut usize,
+    seen: &mut HashSet<PathBuf>,
+) -> Option<PathBuf> {
+    if *left == 0 || Instant::now() >= deadline || !seen.insert(dir.to_path_buf()) {
+        return None;
+    }
+    *left -= 1;
+    if holds_version(dir, version) {
+        return Some(dir.to_path_buf());
+    }
+    if depth == 0 {
+        return None;
+    }
+    let name = dir
+        .file_name()
+        .map(|name| name.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    if SKIPPED.contains(&name.as_str()) {
+        return None;
+    }
+    let Ok(entries) = fs::read_dir(dir) else {
+        return None;
+    };
+    let mut likely = Vec::new();
+    let mut other = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if promising(&name) {
+            likely.push(path);
+        } else {
+            other.push(path);
+        }
+    }
+    for path in likely.into_iter().chain(other) {
+        if let Some(found) = walk_for_version(&path, depth - 1, version, deadline, left, seen) {
+            return Some(found);
+        }
+        if *left == 0 || Instant::now() >= deadline {
+            return None;
+        }
+    }
+    None
 }
 
 /// Copy one file from the player's install, checked like a download; an existing verified
@@ -950,6 +1135,48 @@ pub fn client_libraries(lock: &Lock, manifest: &Value) -> Result<Vec<PathBuf>, S
 mod tests {
     use super::*;
     use std::io::Write;
+
+    /// A launcher installed anywhere is found by the bounded search, by the version JSON or the
+    /// client jar alone; a version that is not there is a quick miss.
+    #[test]
+    fn finds_a_game_folder_anywhere() {
+        let root = std::env::temp_dir().join(format!("horizon-scan-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let game = root.join("Games/TLauncher/.minecraft");
+        fs::create_dir_all(game.join("versions/9.9")).unwrap();
+        fs::write(game.join("versions/9.9/9.9.json"), b"{}").unwrap();
+        // No `9.9.jar`: the search still finds the folder (the error then names the jar).
+        let deadline = Instant::now() + SEARCH_TIME;
+        let mut left = SEARCH_FOLDERS;
+        let mut seen = HashSet::new();
+        assert_eq!(
+            walk_for_version(&root, 6, "9.9", deadline, &mut left, &mut seen),
+            Some(game)
+        );
+        let mut seen = HashSet::new();
+        assert_eq!(
+            walk_for_version(&root, 6, "1.0", deadline, &mut left, &mut seen),
+            None
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Prism Launcher and MultiMC keep the vanilla jar under the Maven coordinate the official
+    /// launcher does not use; the layout is read from the same version JSON.
+    #[test]
+    fn a_prism_layout_is_found() {
+        let folder = std::env::temp_dir().join(format!("horizon-prism-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&folder);
+        let jar = folder.join("libraries/com/mojang/minecraft/9.9/minecraft-9.9-client.jar");
+        fs::create_dir_all(jar.parent().unwrap()).unwrap();
+        fs::create_dir_all(folder.join("versions/9.9")).unwrap();
+        fs::write(folder.join("versions/9.9/9.9.json"), b"{}").unwrap();
+        fs::write(&jar, b"jar").unwrap();
+        let files = game_files(Some(&folder), "9.9");
+        assert_eq!(files.manifest, folder.join("versions/9.9/9.9.json"));
+        assert_eq!(files.client, jar);
+        let _ = fs::remove_dir_all(&folder);
+    }
 
     fn jar(marker: &[u8]) -> Vec<u8> {
         let mut archive = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
