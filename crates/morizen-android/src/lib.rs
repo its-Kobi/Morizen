@@ -10,6 +10,7 @@ pub mod gfx2d;
 pub mod manifest;
 pub mod sandbox;
 pub mod shell;
+pub mod tables;
 
 #[cfg(target_os = "android")]
 use winit::platform::android::activity::AndroidApp;

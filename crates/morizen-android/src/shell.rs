@@ -33,16 +33,17 @@ const VERSION: &str = "26.3";
 struct Paths {
     /// Saves, options.txt and the touch layout: the game's working directory.
     game: PathBuf,
-    /// The prepared resource root: `assets/`, `data/` and, once the exporters have run,
-    /// `horizon-resources.json`.
+    /// The prepared resource root: `assets/`, `data/`, the Rust edition's tables and the world
+    /// generator, with `horizon-resources.json` once the set-up is complete.
     prepared: PathBuf,
-    /// Where a computer-prepared folder can be dropped on Android (`adb push`): this device
-    /// cannot run the Java exporters itself, so a folder made on a computer is the way to play
-    /// before the download-and-prepare step exists here.
+    /// Where a computer-prepared folder can be dropped on Android (`adb push`), for a build or a
+    /// device that cannot run the set-up itself.
     imported: Option<PathBuf>,
     /// Every folder worth looking through for a prepared `26.3` root the player already has:
     /// shared storage, Download, this app's old data folders and the previous package's.
     search: Vec<PathBuf>,
+    /// The build's bundled tables (`tables.zip`), copied out of the app's assets at startup.
+    tables: Option<PathBuf>,
 }
 
 /// The file that makes a folder a prepared game root (`horizon-prepare`'s output).
@@ -57,6 +58,7 @@ enum Page {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Act {
     Download,
+    Sounds,
     Play,
     Search,
     Controls,
@@ -73,10 +75,26 @@ enum Act {
     RemoveKey,
 }
 
-enum Msg {
-    Progress(Progress),
-    Done(Result<(usize, usize), String>),
+/// What the background thread is doing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum JobKind {
+    /// Download Mojang's files and install the Rust edition's tables.
+    Setup,
+    /// The 360 MB of sound effects and music, after the game itself is installed.
+    Sounds,
 }
+
+enum Msg {
+    /// A step the player can read while the work in progress has no byte count.
+    Stage(String),
+    Progress(Progress),
+    /// The line to show when the thread finishes, or why it stopped.
+    Done(Result<String, String>),
+}
+
+/// The work a background job does: stage lines for the player, byte progress for downloads.
+type JobWork =
+    Box<dyn FnOnce(&dyn Fn(&str), &(dyn Fn(Progress) + Sync)) -> Result<String, String> + Send>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Field {
@@ -95,13 +113,15 @@ pub struct Shell {
     name: String,
     name_path: PathBuf,
     editing: Option<Field>,
-    job: Option<Receiver<Msg>>,
+    job: Option<(JobKind, Receiver<Msg>)>,
     progress: Option<Progress>,
     hits: Vec<(Rect, Act)>,
     drag: Option<(u64, String)>,
     selected: Option<String>,
     needs_redraw: bool,
     launch: bool,
+    /// Whether the resumed handler already looked for a download left by an earlier launch.
+    auto_started: bool,
 }
 
 impl Shell {
@@ -131,6 +151,7 @@ impl Shell {
             selected: None,
             needs_redraw: true,
             launch: false,
+            auto_started: false,
         };
         shell.discover(false);
         shell
@@ -140,8 +161,14 @@ impl Shell {
         root.join(MANIFEST).is_file()
     }
 
+    /// Whether the sound effects and music are installed (the game plays silently without them).
+    fn has_sounds(root: &Path) -> bool {
+        root.join("assets/minecraft/sounds.json").is_file()
+    }
+
     /// Whether this root holds Mojang's download but not the tables the Rust game needs, which
-    /// happens when a player downloaded in an earlier build: say so instead of "nothing here".
+    /// happens when a previous launch stopped after downloading: finish that set-up without a
+    /// tap, since the player already agreed to the download.
     fn has_raw_download(root: &Path) -> bool {
         root.join("versions")
             .join(VERSION)
@@ -150,11 +177,23 @@ impl Shell {
             || root.join("assets/indexes").is_dir()
     }
 
-    /// Takes `folder` as the resource root and remembers it for the next launch.
-    fn adopt(&mut self, folder: &Path) {
-        if self.paths.prepared == folder {
+    fn finish_existing_download(&mut self) {
+        if self.paths.tables.is_none() || Self::is_prepared(&self.paths.prepared) {
             return;
         }
+        let started = Self::has_raw_download(&self.paths.prepared)
+            || self
+                .paths
+                .imported
+                .as_deref()
+                .is_some_and(Self::has_raw_download);
+        if started {
+            self.setup();
+        }
+    }
+
+    /// Takes `folder` as the resource root and remembers it for the next launch.
+    fn adopt(&mut self, folder: &Path) {
         self.paths.prepared = folder.to_path_buf();
         let record = self.paths.game.join("prepared-path.txt");
         let _ = std::fs::write(record, folder.to_string_lossy().as_bytes());
@@ -245,98 +284,164 @@ impl Shell {
     }
 
     fn missing_status(&self) -> String {
-        let raw = Self::has_raw_download(&self.paths.prepared)
-            || self
-                .paths
-                .imported
-                .as_deref()
-                .is_some_and(Self::has_raw_download);
-        let mut text = if raw {
+        if self.paths.tables.is_none() {
+            // A build without the bundled tables, or a device that refused the asset: the only
+            // way in is a folder prepared on a computer.
+            let mut text =
+                format!("Minecraft {VERSION} (Rust edition) was not found on this device.");
+            if let Some(imported) = &self.paths.imported {
+                text.push_str(&format!(
+                    " Copy a prepared {VERSION} folder (the one with horizon-resources.json) to {}",
+                    imported.display()
+                ));
+            } else {
+                text.push_str(" Copy a prepared 26.3 folder (the one with horizon-resources.json) to this app's files");
+            }
+            text.push_str(", or anywhere under Download, then tap SEARCH DEVICE.");
+            return text;
+        }
+        if Self::has_raw_download(&self.paths.prepared) {
             format!(
-                "Mojang's Minecraft {VERSION} files are on this device, but the Rust game still \
-                 needs the prepared tables that horizon-prepare writes (horizon-resources.json)."
+                "Mojang's Minecraft {VERSION} files are on this device. Tap DOWNLOAD & SET UP to \
+                 finish installing the Rust edition."
             )
         } else {
-            format!("Minecraft {VERSION} (Rust edition) was not found on this device yet.")
-        };
-        if let Some(imported) = &self.paths.imported {
-            text.push_str(&format!(
-                " Copy a prepared {VERSION} folder (the one with horizon-resources.json) to {}",
-                imported.display()
-            ));
-        } else {
-            text.push_str(" Copy a prepared 26.3 folder (the one with horizon-resources.json) to this app's files");
+            format!(
+                "Tap DOWNLOAD & SET UP: Morizen downloads Minecraft {VERSION} from Mojang (about \
+                 135 MB), checks every file against Mojang's SHA-1, and builds the Rust edition's \
+                 files on this device. Nothing of Mojang's ships in the app."
+            )
         }
-        text.push_str(", or anywhere under Download, then tap SEARCH DEVICE.");
-        text
     }
 
     fn poll_job(&mut self) {
-        let Some(receiver) = &self.job else {
+        let Some((kind, receiver)) = self.job.take() else {
             return;
         };
-        let mut done = false;
+        let mut finished = false;
         loop {
             match receiver.try_recv() {
+                Ok(Msg::Stage(text)) => {
+                    self.progress = None;
+                    self.status = text;
+                    self.needs_redraw = true;
+                }
                 Ok(Msg::Progress(progress)) => {
                     self.progress = Some(progress);
                     self.needs_redraw = true;
                 }
-                Ok(Msg::Done(Ok((files, assets)))) => {
+                Ok(Msg::Done(Ok(text))) => {
                     self.progress = None;
-                    self.status = format!(
-                        "Minecraft {VERSION} is downloaded: {files} files from Mojang's client jar \
-                         and {assets} assets, all checked against their SHA-1. The Rust game also \
-                         needs the prepared tables (horizon-resources.json) that horizon-prepare \
-                         writes on a computer: copy that folder here, or tap SEARCH DEVICE."
-                    );
-                    done = true;
+                    self.status = text;
+                    finished = true;
                 }
                 Ok(Msg::Done(Err(error))) => {
                     self.progress = None;
-                    self.status = format!("The download stopped: {error}");
-                    done = true;
+                    self.status = format!(
+                        "{} stopped: {error}",
+                        match kind {
+                            JobKind::Setup => "The set-up",
+                            JobKind::Sounds => "The sound download",
+                        }
+                    );
+                    finished = true;
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => break,
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    self.progress = None;
-                    done = true;
+                    if !finished {
+                        self.progress = None;
+                        self.status = "The set-up stopped unexpectedly.".to_owned();
+                        finished = true;
+                    }
                     break;
                 }
             }
         }
-        if done {
-            self.job = None;
+        if finished {
+            // A finished set-up may have made this folder playable: remember it.
+            if Self::is_prepared(&self.paths.prepared) {
+                let folder = self.paths.prepared.clone();
+                self.adopt(&folder);
+            }
             self.needs_redraw = true;
+        } else {
+            self.job = Some((kind, receiver));
         }
     }
 
-    fn download(&mut self) {
-        if self.job.is_some() {
-            return;
-        }
+    /// Starts a background job: the status line starts with `status`, then the thread reports.
+    fn start_job(&mut self, kind: JobKind, status: String, work: JobWork) {
         let (sender, receiver) = channel();
         let sender = Arc::new(Mutex::new(sender));
-        let paths = self.paths.clone();
-        self.job = Some(receiver);
-        self.status = format!("Downloading Minecraft {VERSION} from Mojang…");
-        let worker = sender.clone();
+        self.job = Some((kind, receiver));
+        self.progress = None;
+        self.status = status;
+        self.needs_redraw = true;
         std::thread::spawn(move || {
+            let stage = {
+                let sender = sender.clone();
+                move |line: &str| {
+                    let _ = sender.lock().unwrap().send(Msg::Stage(line.to_owned()));
+                }
+            };
             let progress = {
-                let sender = worker.clone();
+                let sender = sender.clone();
                 move |progress: Progress| {
                     let _ = sender.lock().unwrap().send(Msg::Progress(progress));
                 }
             };
-            let result = manifest::download(VERSION, &paths.prepared, &progress)
-                .and_then(|downloaded| manifest::extract_raw(&downloaded, &paths.prepared));
-            let _ = worker.lock().unwrap().send(Msg::Done(result));
+            let result = work(&stage, &progress);
+            let _ = sender.lock().unwrap().send(Msg::Done(result));
         });
+    }
+
+    /// The one tap: Mojang's files, the Rust edition's tables, and the world generator built from
+    /// the client JAR. Every step keeps files that already match, so tapping again resumes.
+    fn setup(&mut self) {
+        if self.job.is_some() {
+            return;
+        }
+        let Some(tables_zip) = self.paths.tables.clone() else {
+            self.status =
+                "This build has no bundled tables: tap SEARCH DEVICE for a prepared 26.3 \
+                           folder."
+                    .to_owned();
+            self.needs_redraw = true;
+            return;
+        };
+        let paths = self.paths.clone();
+        self.start_job(
+            JobKind::Setup,
+            format!("Setting up Minecraft {VERSION}…"),
+            Box::new(
+                move |stage: &dyn Fn(&str), progress: &(dyn Fn(Progress) + Sync)| {
+                    setup_files(&paths, &tables_zip, stage, progress)
+                },
+            ),
+        );
+    }
+
+    /// The sound effects and music, once the game itself plays.
+    fn download_sounds(&mut self) {
+        if self.job.is_some() {
+            return;
+        }
+        let root = self.paths.prepared.clone();
+        self.start_job(
+            JobKind::Sounds,
+            "Downloading sound effects and music…".to_owned(),
+            Box::new(
+                move |stage: &dyn Fn(&str), progress: &(dyn Fn(Progress) + Sync)| {
+                    sounds_files(&root, stage, progress)
+                },
+            ),
+        );
     }
 
     fn activate(&mut self, act: Act) {
         match act {
-            Act::Download => self.download(),
+            Act::Download => self.setup(),
+            Act::Sounds => self.download_sounds(),
             Act::Controls => {
                 self.page = Page::Controls;
                 self.status.clear();
@@ -579,17 +684,20 @@ impl Shell {
         let bx = (w - bw) / 2.0;
         let mut y = h * 0.55;
         let gap = 2.5 * ui;
-        let downloading = self.job.is_some();
-        self.button(
-            painter,
-            bx,
-            y,
-            bw,
-            bh,
-            "DOWNLOAD MOJANG FILES",
-            Act::Download,
-            !downloading,
-        );
+        let working = self.job.is_some();
+        let prepared = Self::is_prepared(&self.paths.prepared);
+        let (label, act, enabled) = if !prepared {
+            (
+                "DOWNLOAD & SET UP",
+                Act::Download,
+                self.paths.tables.is_some(),
+            )
+        } else if !Self::has_sounds(&self.paths.prepared) {
+            ("DOWNLOAD SOUNDS", Act::Sounds, true)
+        } else {
+            ("SET-UP COMPLETE", Act::Download, false)
+        };
+        self.button(painter, bx, y, bw, bh, label, act, enabled && !working);
         y += bh + gap;
         self.button(
             painter,
@@ -599,10 +707,10 @@ impl Shell {
             bh,
             "TOUCH CONTROLS",
             Act::Controls,
-            true,
+            !working,
         );
         y += bh + gap;
-        if Self::is_prepared(&self.paths.prepared) {
+        if prepared {
             self.button(painter, bx, y, bw, bh, "PLAY", Act::Play, true);
         } else {
             self.button(
@@ -613,12 +721,12 @@ impl Shell {
                 bh,
                 "SEARCH DEVICE FOR 26.3",
                 Act::Search,
-                !downloading,
+                !working,
             );
         }
         y += bh + gap;
         let name = format!("PLAYER: {}", self.name.to_ascii_uppercase());
-        self.button(painter, bx, y, bw, 7.0 * ui, &name, Act::Name, !downloading);
+        self.button(painter, bx, y, bw, 7.0 * ui, &name, Act::Name, !working);
     }
 
     fn paint_controls(&mut self, painter: &mut Painter) {
@@ -763,6 +871,51 @@ impl Shell {
     }
 }
 
+/// The one tap, on a background thread: Mojang's files (each checked against the SHA-1 Mojang
+/// publishes), then the Rust edition's tables, then the world generator built from the client
+/// JAR. Every step keeps files that already match, so a second tap resumes rather than repeats.
+fn setup_files(
+    paths: &Paths,
+    tables_zip: &Path,
+    stage: &dyn Fn(&str),
+    progress: &(dyn Fn(Progress) + Sync),
+) -> Result<String, String> {
+    let root = &paths.prepared;
+    stage(&format!("Downloading Minecraft {VERSION} from Mojang…"));
+    let downloaded = manifest::download(VERSION, root, progress)?;
+    stage("Unpacking Mojang's client…");
+    let (files, assets) = manifest::extract_raw(&downloaded, root)?;
+    stage("Installing the Rust edition's tables and world generator…");
+    let tables = crate::tables::install(tables_zip, root, &downloaded.client_jar, &|line| {
+        log::info!("Morizen: {line}");
+    })?;
+    Ok(format!(
+        "Minecraft {VERSION} is ready ({files} client files, {assets} assets, {tables} Rust edition \
+         tables). Tap PLAY.{}",
+        if Shell::has_sounds(root) {
+            ""
+        } else {
+            " Sound effects are not installed: tap DOWNLOAD SOUNDS."
+        }
+    ))
+}
+
+/// The sound effects and music (about 360 MB), installed into the prepared root's `assets/`.
+fn sounds_files(
+    root: &Path,
+    stage: &dyn Fn(&str),
+    progress: &(dyn Fn(Progress) + Sync),
+) -> Result<String, String> {
+    stage("Downloading sound effects and music…");
+    let files = manifest::download_sounds(VERSION, root, progress)?;
+    stage("Installing the sounds…");
+    let index = manifest::asset_index_path(root, VERSION)?;
+    let installed = manifest::materialise_assets(root, &index, root)?;
+    Ok(format!(
+        "Sound effects and music are installed ({files} files, {installed} assets ready). Tap PLAY."
+    ))
+}
+
 impl ApplicationHandler for Shell {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
@@ -793,6 +946,10 @@ impl ApplicationHandler for Shell {
         }
         self.window = Some(window);
         self.needs_redraw = true;
+        if !self.auto_started {
+            self.auto_started = true;
+            self.finish_existing_download();
+        }
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
@@ -911,6 +1068,39 @@ impl ApplicationHandler for Stage {
     }
 }
 
+/// Reads the build's `tables.zip` out of the APK's assets into the app's data folder, once.
+#[cfg(target_os = "android")]
+fn bundled_tables(
+    app: &winit::platform::android::activity::AndroidApp,
+    data: &Path,
+) -> Option<PathBuf> {
+    use std::ffi::CString;
+    // The build's workflow prepared tables with `horizon-prepare` and packed them beside the
+    // libraries; they are read out of the APK once into the app's own data folder, where `zip`
+    // and the game can seek in them.
+    let name = CString::new("tables.zip").ok()?;
+    let manager = app.asset_manager();
+    let mut asset = manager.open(&name)?;
+    let path = data.join("tables.zip");
+    let length = asset.length() as u64;
+    if std::fs::metadata(&path).map(|meta| meta.len()) == Ok(length) {
+        return Some(path);
+    }
+    match std::fs::File::create(&path) {
+        Ok(mut file) => match std::io::copy(&mut asset, &mut file) {
+            Ok(_) => Some(path),
+            Err(error) => {
+                log::warn!("Morizen: could not read the bundled tables: {error}");
+                None
+            }
+        },
+        Err(error) => {
+            log::warn!("Morizen: could not write {}: {error}", path.display());
+            None
+        }
+    }
+}
+
 /// Opens Morizen's screen and runs the app until its window closes. The game, once started, takes
 /// over the same event loop.
 #[cfg(target_os = "android")]
@@ -920,8 +1110,8 @@ pub fn run(app: winit::platform::android::activity::AndroidApp) -> Result<(), St
         .internal_data_path()
         .ok_or("Android did not provide an app data folder.")?;
     let downloaded = data.join("prepared").join(VERSION);
-    // A folder prepared on a computer wins when it is complete: this device cannot run the game's
-    // Java exporters, so that copy is the only way to play before the download does more.
+    // A folder prepared on a computer wins when it is complete; without one the app prepares its
+    // own root here.
     let external = app.external_data_path();
     let imported = external
         .as_ref()
@@ -979,6 +1169,7 @@ pub fn run(app: winit::platform::android::activity::AndroidApp) -> Result<(), St
         prepared,
         imported,
         search,
+        tables: bundled_tables(&app, &data),
     };
     for folder in [
         Some(&paths.game),
@@ -1028,6 +1219,7 @@ mod tests {
             prepared: dir.join("nothing-here"),
             imported: None,
             search: vec![dir.join("Download")],
+            tables: None,
         };
         let shell = Shell::new(paths);
         assert_eq!(shell.paths.prepared, root);
@@ -1046,6 +1238,7 @@ mod tests {
             prepared: prepared.clone(),
             imported: Some(dir.join("external").join(VERSION)),
             search: Vec::new(),
+            tables: Some(dir.join("tables.zip")),
         };
         let shell = Shell::new(paths);
         assert_eq!(shell.paths.prepared, prepared);

@@ -18,6 +18,7 @@ java-mods = []
 
 [dependencies]
 horizon-client = { path = "../horizon-client", default-features = false, features = ["android-game", "touch-controls"] }
+horizon-prepare = { path = "../horizon-prepare" }
 horizon-protocol = { path = "../horizon-protocol" }
 bytemuck = { version = "1", features = ["derive"] }
 log = "0.4"
@@ -38,6 +39,11 @@ package = "com.morizen.app"
 build_targets = ["aarch64-linux-android"]
 apk_name = "morizen-android-arm64"
 strip = "strip"
+# The Rust edition's tables (`tables.zip`, produced by the Android workflow's `tables` job with
+# `horizon-prepare`) ship beside the app and are installed on the device; the icon and its
+# resources come from `res/`.
+assets = "assets"
+resources = "res"
 
 [package.metadata.android.sdk]
 min_sdk_version = 29
@@ -66,6 +72,7 @@ version = 1
 [package.metadata.android.application]
 label = "Morizen 26.3 Rust"
 theme = "@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen"
+icon = "@mipmap/ic_launcher"
 
 [package.metadata.android.application.activity]
 orientation = "landscape"

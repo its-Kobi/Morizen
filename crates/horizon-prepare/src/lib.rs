@@ -11,6 +11,7 @@
 //! run, keyed by the sha256 of their inputs and outputs recorded in the manifest, as before.
 
 pub mod artifacts;
+pub mod assemble;
 pub mod exporters;
 mod files;
 mod inventory;
@@ -128,7 +129,7 @@ fn write(path: &Path, data: &[u8]) -> Result<(), String> {
     fs::write(path, data).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-fn mkdir(path: &Path) -> Result<(), String> {
+pub(crate) fn mkdir(path: &Path) -> Result<(), String> {
     fs::create_dir_all(path).map_err(|e| format!("{}: {e}", path.display()))
 }
 
@@ -138,7 +139,7 @@ pub(crate) fn read_json(path: &Path) -> Result<Value, String> {
 }
 
 /// Python's `Path.write_text`: text mode, so `\n` is the platform's line ending.
-fn write_text(path: &Path, text: &str) -> Result<(), String> {
+pub(crate) fn write_text(path: &Path, text: &str) -> Result<(), String> {
     if cfg!(windows) {
         write(path, text.replace('\n', "\r\n").as_bytes())
     } else {
@@ -153,7 +154,7 @@ pub(crate) fn write_json(path: &Path, value: &Value) -> Result<(), String> {
 }
 
 /// Writes `data` unless the file already holds it, so unchanged files keep their times.
-fn write_if_changed(target: &Path, data: &[u8]) -> Result<(), String> {
+pub(crate) fn write_if_changed(target: &Path, data: &[u8]) -> Result<(), String> {
     if !(target.exists() && read(target)? == data) {
         mkdir(target.parent().unwrap())?;
         write(target, data)?;
@@ -161,7 +162,7 @@ fn write_if_changed(target: &Path, data: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-fn copy(from: &Path, to: &Path) -> Result<(), String> {
+pub(crate) fn copy(from: &Path, to: &Path) -> Result<(), String> {
     write(to, &read(from)?)
 }
 
@@ -236,7 +237,7 @@ pub(crate) fn zip_text(
 }
 
 /// The archive's member names in its own order (Python's `namelist`).
-fn zip_names(archive: &zip::ZipArchive<fs::File>) -> Vec<String> {
+pub(crate) fn zip_names(archive: &zip::ZipArchive<fs::File>) -> Vec<String> {
     (0..archive.len())
         .filter_map(|i| archive.name_for_index(i).map(str::to_string))
         .collect()
@@ -244,7 +245,10 @@ fn zip_names(archive: &zip::ZipArchive<fs::File>) -> Vec<String> {
 
 /// `{"minecraft:<path>": text}` for every `<prefix><path>.json`, sorted by member name
 /// (the comprehension the Python preparer used for tags, worldgen and damage resources).
-fn json_resources(archive: &mut zip::ZipArchive<fs::File>, prefix: &str) -> Result<Value, String> {
+pub(crate) fn json_resources(
+    archive: &mut zip::ZipArchive<fs::File>,
+    prefix: &str,
+) -> Result<Value, String> {
     let mut names: Vec<String> = zip_names(archive)
         .into_iter()
         .filter(|n| n.starts_with(prefix) && n.ends_with(".json"))
@@ -1038,7 +1042,7 @@ fn install_datagen_reports(root: &Path, reports: &Path) -> Result<(), String> {
 }
 
 /// `sorted(directory.glob('*.json'))`: glob skips names starting with a dot.
-fn json_files(directory: &Path) -> Result<Vec<PathBuf>, String> {
+pub(crate) fn json_files(directory: &Path) -> Result<Vec<PathBuf>, String> {
     let mut files: Vec<PathBuf> = fs::read_dir(directory)
         .map_err(|e| format!("{}: {e}", directory.display()))?
         .filter_map(Result::ok)
@@ -1052,7 +1056,7 @@ fn json_files(directory: &Path) -> Result<Vec<PathBuf>, String> {
     Ok(files)
 }
 
-const WORLDGEN_BUNDLES: [(&str, &str); 19] = [
+pub(crate) const WORLDGEN_BUNDLES: [(&str, &str); 19] = [
     ("noises", "worldgen/noise"),
     ("densities", "worldgen/density_function"),
     ("rules", "worldgen/material_rule"),
@@ -1092,16 +1096,8 @@ fn prepare_worldgen(run: &Run) -> Result<(), String> {
     mkdir(&out)?;
     // Structure templates: gzip NBT files under structure/<namespace>/<path>.nbt.
     let mut server = open_zip(&run.server)?;
-    let prefix = "data/minecraft/structure/";
-    for name in zip_names(&server) {
-        if name.starts_with(prefix) && name.ends_with(".nbt") {
-            let relative = member_path(&name[prefix.len()..], "Invalid structure path")?;
-            let data = zip_bytes(&mut server, &name)?;
-            write_if_changed(&out.join("structure/minecraft").join(relative), &data)?;
-        }
-    }
     let mut client = open_zip(&run.client)?;
-    for (name, path) in WORLDGEN_BUNDLES {
+    for (_, path) in WORLDGEN_BUNDLES {
         let prefix = format!("data/minecraft/{path}/");
         let resources = json_resources(&mut server, &prefix)?;
         if resources.as_object().is_none_or(<[_]>::is_empty)
@@ -1109,11 +1105,11 @@ fn prepare_worldgen(run: &Run) -> Result<(), String> {
         {
             return Err(format!("Reference worldgen resources disagree: {path}"));
         }
-        write_text(
-            &out.join(format!("{name}.json")),
-            &pyjson::dumps(&resources, &pyjson::COMPACT),
-        )?;
     }
+    // The server jar is the reference; the Android app rebuilds the same files from the client
+    // jar, which holds the same data (assemble::worldgen_from_client).
+    assemble::structures(&mut server, &out)?;
+    assemble::bundles(&mut server, &out)?;
     let facts = read_json(&root.join("facts.json"))?;
     let short = || "A block state in facts.json is short".to_string();
     let flags = facts

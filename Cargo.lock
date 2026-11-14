@@ -2309,6 +2309,7 @@ dependencies = [
  "android_logger",
  "bytemuck",
  "horizon-client",
+ "horizon-prepare",
  "horizon-protocol",
  "log",
  "pollster",

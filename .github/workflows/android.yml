@@ -2,13 +2,25 @@ name: Android foundation
 
 # Builds the native APK as the mobile port is developed. It is deliberately an Actions artifact,
 # not a release asset, until resource preparation and the mobile launcher screen are complete.
+#
+# The app ships no Mojang file. A phone cannot run the Java exporters that write the Rust
+# edition's tables, so the `tables` job prepares them on the runner (from jars it downloads
+# itself) and the `apk` job bundles only that generated output.
 on:
   push:
     branches: [main]
     paths:
       - 'crates/morizen-android/**'
+      - 'crates/horizon-prepare/**'
       - 'crates/horizon-client-input/**'
       - 'crates/horizon-client/**'
+      - 'crates/horizon-client-render/**'
+      - 'crates/horizon-world/**'
+      - 'crates/horizon-core/**'
+      - 'crates/horizon-items/**'
+      - 'mods/horizon/src/test/java/**'
+      - 'tools/ci/**'
+      - 'research-lock.json'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/android.yml'
@@ -18,7 +30,49 @@ permissions:
   contents: read
 
 jobs:
+  # Runs the game's Java exporters on a runner and ships their tables, which a device cannot
+  # generate. The jars stay on the runner; only `tables.zip` reaches the APK.
+  tables:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: morizen-android-tables
+      - name: Cache the prepared tables
+        id: cache-tables
+        uses: actions/cache@v4
+        with:
+          path: crates/morizen-android/assets/tables.zip
+          key: morizen-tables-${{ hashFiles('research-lock.json', 'crates/horizon-prepare/**', 'crates/horizon-client/**', 'crates/horizon-client-render/**', 'crates/horizon-world/**', 'crates/horizon-core/**', 'crates/horizon-items/**', 'mods/horizon/src/test/java/**', 'tools/ci/android_tables.py') }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Download the pinned Minecraft files from Mojang
+        if: steps.cache-tables.outputs.cache-hit != 'true'
+        run: python3 tools/ci/mojang_files.py --dir .local/ci-minecraft
+      - name: Prepare the Rust edition's tables
+        if: steps.cache-tables.outputs.cache-hit != 'true'
+        run: >-
+          cargo run --release --locked -p horizon-prepare --
+          --prepare
+          --minecraft-dir .local/ci-minecraft
+          --server-jar .local/ci-minecraft/server.jar
+      - name: Pack the tables for the app
+        if: steps.cache-tables.outputs.cache-hit != 'true'
+        run: python3 tools/ci/android_tables.py --output crates/morizen-android/assets/tables.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: morizen-android-tables
+          path: crates/morizen-android/assets/tables.zip
+          if-no-files-found: error
+          retention-days: 14
+
   apk:
+    needs: tables
     runs-on: ubuntu-22.04
     timeout-minutes: 90
     steps:
@@ -31,11 +85,18 @@ jobs:
         with:
           shared-key: morizen-android-arm64
       - name: Check formatting
-        run: cargo fmt --check -p horizon-client-input -p horizon-client -p morizen-android
+        run: >-
+          cargo fmt --check -p horizon-client-input -p horizon-client -p horizon-prepare
+          -p morizen-android
       - name: Test the touch layout and multi-touch state
         run: cargo test --locked -p horizon-client-input touch::tests
-      - name: Test the mobile manifest cache and native sandbox
+      - name: Test the mobile manifest cache, tables and native sandbox
         run: cargo test --locked -p morizen-android --lib
+      - name: Download the prepared tables
+        uses: actions/download-artifact@v4
+        with:
+          name: morizen-android-tables
+          path: crates/morizen-android/assets
       - name: Install the Rust APK packager
         run: cargo install cargo-apk --version 0.10.0 --locked
       - name: Build the arm64 APK

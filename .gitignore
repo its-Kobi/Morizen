@@ -35,3 +35,5 @@
 
 # Release-only compiled original exporter bundle.
 /exporters/
+# The Android build's generated tables: the APK workflow puts them in, nothing is committed.
+/crates/morizen-android/assets/tables.zip

@@ -170,7 +170,7 @@ where
         total: 1,
     });
     download_one(&index_artifact, fetch)?;
-    let assets = asset_artifacts(&index_artifact.path, root)?;
+    let assets = asset_artifacts(&index_artifact.path, root, is_game_asset)?;
     download_many(&assets, fetch, progress)?;
     Ok(Downloaded {
         version: version.into(),
@@ -181,12 +181,77 @@ where
     })
 }
 
+/// The assets only the asset index holds, which the game reads even without sound: the full title
+/// panorama (the JAR has 1×1 placeholders), the Unifont fallback, the built-in resource packs, and
+/// every bundled language (the JAR carries `en_us` alone). Sounds are 360 MB and come on their own
+/// (`download_sounds`).
+fn is_game_asset(name: &str) -> bool {
+    name == "pack.mcmeta"
+        || name.starts_with("minecraft/lang/")
+        || name.starts_with("minecraft/font/")
+        || name.starts_with("minecraft/resourcepacks/")
+        || name.starts_with("minecraft/textures/gui/title/background/panorama")
+}
+
+/// Whether the game plays this asset: sounds.json and everything under sounds/.
+fn is_sound(name: &str) -> bool {
+    name == "minecraft/sounds.json" || name.starts_with("minecraft/sounds/")
+}
+
+/// Downloads the version's sound effects and music (about 360 MB) after the game itself is
+/// installed; the store and the version JSON are already there.
+pub fn download_sounds(
+    version: &str,
+    root: &Path,
+    progress: &(dyn Fn(Progress) + Sync),
+) -> Result<usize, String> {
+    download_sounds_with(version, root, &fetch_url, progress)
+}
+
+pub fn download_sounds_with<F>(
+    version: &str,
+    root: &Path,
+    fetch: &F,
+    progress: &(dyn Fn(Progress) + Sync),
+) -> Result<usize, String>
+where
+    F: Fn(&str) -> Result<Vec<u8>, String> + Sync,
+{
+    let index = asset_index_path(root, version)?;
+    let objects = asset_artifacts(&index, root, is_sound)?;
+    download_many(&objects, fetch, progress)?;
+    Ok(objects.len())
+}
+
+/// The asset index the version's metadata names, once it has been downloaded.
+pub fn asset_index_path(root: &Path, version: &str) -> Result<PathBuf, String> {
+    let version_json = root
+        .join("versions")
+        .join(version)
+        .join(format!("{version}.json"));
+    let data: serde_json::Value = serde_json::from_slice(
+        &fs::read(&version_json).map_err(|e| format!("{}: {e}", version_json.display()))?,
+    )
+    .map_err(|e| format!("Minecraft {version} metadata: {e}"))?;
+    let index_id = text(&data["assetIndex"], "id")?;
+    if !plain(&index_id) {
+        return Err("The asset index id is not a plain name.".into());
+    }
+    Ok(root.join("assets/indexes").join(format!("{index_id}.json")))
+}
+
 /// Extract the raw `assets/` and `data/` trees and materialise indexed assets (notably sounds).
-/// This intentionally does not write `horizon-resources.json`: Java-free generation of Horizon's
-/// remaining runtime tables must finish before the folder can be called prepared.
+/// This intentionally does not write `horizon-resources.json`: the Rust edition's tables are
+/// installed by `tables::install`, which also rebuilds the world generator from the client JAR.
 pub fn extract_raw(download: &Downloaded, output: &Path) -> Result<(usize, usize), String> {
-    let file = fs::File::open(&download.client_jar)
-        .map_err(|e| format!("{}: {e}", download.client_jar.display()))?;
+    let extracted = extract_jar_tree(&download.client_jar, output)?;
+    let materialised = materialise_assets(&download.root, &download.asset_index, output)?;
+    Ok((extracted, materialised))
+}
+
+/// Every `assets/` and `data/` member of Mojang's client JAR, at its own path.
+fn extract_jar_tree(client_jar: &Path, output: &Path) -> Result<usize, String> {
+    let file = fs::File::open(client_jar).map_err(|e| format!("{}: {e}", client_jar.display()))?;
     let mut jar = zip::ZipArchive::new(file).map_err(|e| format!("Client JAR: {e}"))?;
     let mut extracted = 0;
     for index in 0..jar.len() {
@@ -202,9 +267,15 @@ pub fn extract_raw(download: &Downloaded, output: &Path) -> Result<(usize, usize
         write_stream(&output.join(relative), &mut entry)?;
         extracted += 1;
     }
+    Ok(extracted)
+}
+
+/// Copies every asset-index object the store below `root` has into `output/assets/<name>`, the
+/// layout the game reads. Objects that were not downloaded (sounds before their own download)
+/// are skipped.
+pub fn materialise_assets(root: &Path, asset_index: &Path, output: &Path) -> Result<usize, String> {
     let index: serde_json::Value = serde_json::from_slice(
-        &fs::read(&download.asset_index)
-            .map_err(|e| format!("{}: {e}", download.asset_index.display()))?,
+        &fs::read(asset_index).map_err(|e| format!("{}: {e}", asset_index.display()))?,
     )
     .map_err(|e| format!("Asset index: {e}"))?;
     let objects = index["objects"]
@@ -214,11 +285,10 @@ pub fn extract_raw(download: &Downloaded, output: &Path) -> Result<(usize, usize
     for (name, value) in objects {
         let hash = value["hash"].as_str().ok_or("An asset has no hash.")?;
         valid_hash(hash)?;
-        let from = download
-            .root
-            .join("assets/objects")
-            .join(&hash[..2])
-            .join(hash);
+        let from = root.join("assets/objects").join(&hash[..2]).join(hash);
+        if !from.is_file() {
+            continue;
+        }
         let to = output.join("assets").join(safe_path(name)?);
         if let Some(parent) = to.parent() {
             fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
@@ -226,7 +296,7 @@ pub fn extract_raw(download: &Downloaded, output: &Path) -> Result<(usize, usize
         fs::copy(&from, &to).map_err(|e| format!("{}: {e}", to.display()))?;
         materialised += 1;
     }
-    Ok((extracted, materialised))
+    Ok(materialised)
 }
 
 fn artifact(value: &serde_json::Value, path: PathBuf) -> Result<Artifact, String> {
@@ -245,7 +315,11 @@ fn text(value: &serde_json::Value, field: &str) -> Result<String, String> {
         .ok_or_else(|| format!("Minecraft metadata has no {field}."))
 }
 
-fn asset_artifacts(index: &Path, root: &Path) -> Result<Vec<Artifact>, String> {
+fn asset_artifacts(
+    index: &Path,
+    root: &Path,
+    wanted: fn(&str) -> bool,
+) -> Result<Vec<Artifact>, String> {
     let value: serde_json::Value =
         serde_json::from_slice(&fs::read(index).map_err(|e| format!("{}: {e}", index.display()))?)
             .map_err(|e| format!("Asset index: {e}"))?;
@@ -254,7 +328,10 @@ fn asset_artifacts(index: &Path, root: &Path) -> Result<Vec<Artifact>, String> {
         .ok_or("The asset index has no objects.")?;
     let mut seen = HashSet::new();
     let mut out = Vec::new();
-    for object in objects.values() {
+    for (name, object) in objects {
+        if !wanted(name) {
+            continue;
+        }
         let hash = object["hash"].as_str().ok_or("An asset has no hash.")?;
         valid_hash(hash)?;
         if !seen.insert(hash.to_owned()) {
@@ -413,10 +490,13 @@ mod tests {
     #[test]
     fn manifest_client_index_and_assets_are_checked_cached_and_extracted() {
         let client = jar();
+        let lang = b"{}".to_vec();
         let sound = b"sound".to_vec();
         let client_hash = sha1_bytes(&client);
+        let lang_hash = sha1_bytes(&lang);
         let sound_hash = sha1_bytes(&sound);
         let index = serde_json::to_vec(&serde_json::json!({"objects": {
+            "minecraft/lang/de_de.json": {"hash": lang_hash.clone(), "size": lang.len()},
             "minecraft/sounds/a.ogg": {"hash": sound_hash.clone(), "size": sound.len()}
         }}))
         .unwrap();
@@ -441,11 +521,27 @@ mod tests {
             format!("{ASSET_OBJECTS}/{}/{sound_hash}", &sound_hash[..2]),
             sound,
         );
+        replies.insert(
+            format!("{ASSET_OBJECTS}/{}/{lang_hash}", &lang_hash[..2]),
+            lang,
+        );
         let fetch = |url: &str| replies.get(url).cloned().ok_or_else(|| url.to_owned());
         let root = std::env::temp_dir().join(format!("morizen-mobile-{}", std::process::id()));
         let downloaded = download_with("26.3", &root, &fetch, &|_| {}).unwrap();
         let output = root.join("prepared");
         assert_eq!(extract_raw(&downloaded, &output).unwrap(), (1, 1));
+        assert_eq!(
+            fs::read(output.join("assets/minecraft/lang/de_de.json")).unwrap(),
+            b"{}"
+        );
+        // Sound effects are a separate, much larger download, and are materialised later.
+        assert!(!output.join("assets/minecraft/sounds/a.ogg").exists());
+        assert_eq!(
+            download_sounds_with("26.3", &root, &fetch, &|_| {}).unwrap(),
+            1
+        );
+        let index_path = asset_index_path(&root, "26.3").unwrap();
+        assert_eq!(materialise_assets(&root, &index_path, &output).unwrap(), 2);
         assert_eq!(
             fs::read(output.join("assets/minecraft/sounds/a.ogg")).unwrap(),
             b"sound"
