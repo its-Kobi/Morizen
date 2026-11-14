@@ -27,7 +27,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   # Runs the game's Java exporters on a runner and ships their tables, which a device cannot
@@ -107,3 +107,18 @@ jobs:
           path: target/debug/apk/*.apk
           if-no-files-found: error
           retention-days: 14
+      # The numbered release (`v<version>`) carries the launcher archives and this APK. The
+      # launcher workflow opens it; this waits for that tag, then attaches the APK.
+      - name: Attach the APK to the numbered release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' crates/morizen-android/Cargo.toml | head -n1)
+          tag="v$version"
+          for attempt in $(seq 1 120); do
+            if gh release view "$tag" > /dev/null 2>&1; then break; fi
+            sleep 20
+          done
+          gh release view "$tag" > /dev/null
+          gh release upload "$tag" target/debug/apk/*.apk --clobber

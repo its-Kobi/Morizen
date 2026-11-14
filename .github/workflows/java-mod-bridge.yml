@@ -159,3 +159,30 @@ jobs:
             dist/morizen-launcher-windows-x64.zip \
             dist/morizen-launcher-linux-x86_64.tar.gz \
             dist/SHA256SUMS dist/SHA256SUMS.sig --clobber
+          # The numbered release is the one people link to; the Android workflow adds the APK
+          # to the same tag (`v<version>`) when its build finishes.
+          version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' launcher/Cargo.toml | head -n1)
+          tag="v$version"
+          if ! gh release view "$tag" > /dev/null 2>&1; then
+            cat > "$RUNNER_TEMP/version-notes.md" <<EOF
+          # Morizen $version
+
+          The stable Morizen release.
+
+          - **Windows x64:** \`morizen-launcher-windows-x64.zip\`
+          - **Linux x64:** \`morizen-launcher-linux-x86_64.tar.gz\`
+          - **Android arm64:** \`morizen-android-arm64.apk\` (built by the Android workflow and
+            attached to this release)
+
+          The launcher installs the game itself: Minecraft Rust builds come from the signed
+          releases of [\`horizon-rust/horizon\`](https://github.com/horizon-rust/horizon).
+          Each launcher archive contains the launcher only, not the game. The Android app
+          ships no Mojang file either: it downloads Minecraft 26.3 from Mojang on the device.
+          EOF
+            gh release create "$tag" --title "Morizen $version" \
+              --notes-file "$RUNNER_TEMP/version-notes.md"
+          fi
+          gh release upload "$tag" \
+            dist/morizen-launcher-windows-x64.zip \
+            dist/morizen-launcher-linux-x86_64.tar.gz \
+            dist/SHA256SUMS dist/SHA256SUMS.sig --clobber
