@@ -121,4 +121,4 @@ jobs:
             sleep 20
           done
           gh release view "$tag" > /dev/null
-          gh release upload "$tag" target/debug/apk/*.apk --clobber
+          gh release upload "$tag" target/debug/apk/morizen-android-arm64.apk --clobber
