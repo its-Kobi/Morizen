@@ -1083,7 +1083,7 @@ fn bundled_tables(
     let mut asset = manager.open(&name)?;
     let path = data.join("tables.zip");
     let length = asset.length() as u64;
-    if std::fs::metadata(&path).map(|meta| meta.len()) == Ok(length) {
+    if std::fs::metadata(&path).is_ok_and(|meta| meta.len() == length) {
         return Some(path);
     }
     match std::fs::File::create(&path) {

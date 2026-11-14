@@ -3813,7 +3813,8 @@ mod tests {
                 "body": "<!-- morizen-build: abcdef123456 -->",
                 "assets": [{
                     "name": archive,
-                    "browser_download_url": "https://example.test/morizen-launcher.zip",
+                    "browser_download_url":
+                        "https://example.test/morizen-launcher-windows-x64.zip",
                     "size": 1
                 }]
             }]);
