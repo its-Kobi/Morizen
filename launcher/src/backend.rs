@@ -3826,8 +3826,8 @@ mod tests {
             // offered: Morizen only self-updates to its own builds.
             let mut list = list;
             list[0]["assets"][0] = serde_json::json!({
-                "name": "horizon-launcher",
-                "browser_download_url": "https://example.test/horizon-launcher",
+                "name": archive,
+                "browser_download_url": "https://example.test/horizon-launcher-windows-x64.zip",
                 "size": 1
             });
             assert!(launcher_releases_in_with(&list, |_| panic!("no fallback needed")).is_empty());
