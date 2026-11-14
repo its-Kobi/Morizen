@@ -66,9 +66,34 @@ struct Artifact {
 }
 
 pub fn fetch_url(url: &str) -> Result<Vec<u8>, String> {
+    let mut last = String::new();
+    // A phone network can stall for a moment without being gone, so a failed download is tried
+    // again twice. The timeout is per socket read, never for the whole file: a big client JAR on
+    // a slow connection takes minutes and is not a timeout (the first Android build used one
+    // 90-second limit and stopped mid-download).
+    for attempt in 0..3 {
+        match fetch_once(url) {
+            Ok(bytes) => return Ok(bytes),
+            Err(error) => {
+                last = error;
+                if attempt < 2 {
+                    std::thread::sleep(std::time::Duration::from_secs(2 << attempt));
+                }
+            }
+        }
+    }
+    Err(format!(
+        "{last} (the connection stalled or was too slow; what was already downloaded is kept, so \
+         tap DOWNLOAD & SET UP again)"
+    ))
+}
+
+fn fetch_once(url: &str) -> Result<Vec<u8>, String> {
     let response = ureq::AgentBuilder::new()
-        .timeout(std::time::Duration::from_secs(90))
-        .user_agent("Morizen-Android/0.1")
+        .timeout_connect(std::time::Duration::from_secs(30))
+        .timeout_read(std::time::Duration::from_secs(120))
+        .timeout_write(std::time::Duration::from_secs(60))
+        .user_agent("Morizen-Android/1.0")
         .build()
         .get(url)
         .call()

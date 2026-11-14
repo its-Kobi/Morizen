@@ -114,6 +114,9 @@ pub struct Shell {
     name_path: PathBuf,
     editing: Option<Field>,
     job: Option<(JobKind, Receiver<Msg>)>,
+    /// A thorough device search running on its own thread, so the screen stays responsive and
+    /// shows that it is looking.
+    search: Option<Receiver<Option<PathBuf>>>,
     progress: Option<Progress>,
     hits: Vec<(Rect, Act)>,
     drag: Option<(u64, String)>,
@@ -145,6 +148,7 @@ impl Shell {
             name_path,
             editing: None,
             job: None,
+            search: None,
             progress: None,
             hits: Vec::new(),
             drag: None,
@@ -201,11 +205,19 @@ impl Shell {
 
     /// Looks for a prepared root the player already has. `thorough` also opens subfolders (a
     /// desktop checkout's `.local/horizon-client/26.3`, for instance); the quick pass keeps
-    /// startup short.
-    fn scan(&self, depth: u32, budget: usize) -> Option<PathBuf> {
+    /// startup short. Free of `self` so a thorough search can run on its own thread.
+    fn find(paths: &Paths, thorough: bool) -> Option<PathBuf> {
+        let remembered = std::fs::read_to_string(paths.game.join("prepared-path.txt"))
+            .ok()
+            .map(|saved| PathBuf::from(saved.trim()))
+            .filter(|folder| Self::is_prepared(folder));
+        if let Some(folder) = remembered {
+            return Some(folder);
+        }
         let mut seen = HashSet::new();
-        let mut left = budget;
-        for root in std::iter::once(&self.paths.prepared).chain(self.paths.search.iter()) {
+        let mut left = if thorough { 20_000 } else { 800 };
+        let depth = if thorough { 6 } else { 4 };
+        for root in std::iter::once(&paths.prepared).chain(paths.search.iter()) {
             let mut found = None;
             Self::walk(root, depth, &mut left, &mut seen, &mut found);
             if found.is_some() {
@@ -256,17 +268,7 @@ impl Shell {
     /// Finds a prepared root on this device, if there is one, and updates the status for it.
     /// The quick pass runs at startup; Search runs the thorough one.
     fn discover(&mut self, thorough: bool) -> bool {
-        let remembered = std::fs::read_to_string(self.paths.game.join("prepared-path.txt"))
-            .ok()
-            .map(|saved| PathBuf::from(saved.trim()))
-            .filter(|folder| Self::is_prepared(folder));
-        let found = remembered.or_else(|| {
-            if thorough {
-                self.scan(4, 3000)
-            } else {
-                self.scan(4, 800)
-            }
-        });
+        let found = Self::find(&self.paths, thorough);
         match found {
             Some(folder) => {
                 self.adopt(&folder);
@@ -277,7 +279,17 @@ impl Shell {
                 true
             }
             None => {
-                self.status = self.missing_status();
+                self.status = if thorough {
+                    format!(
+                        "No downloaded copy of Minecraft {VERSION} (Rust edition) was found in \
+                         Download, Documents, this app's folders or a memory card. Tap DOWNLOAD & \
+                         SET UP to install it from Mojang. If you copied a prepared folder into \
+                         Download, allow all files access for Morizen in Android Settings so the \
+                         search can read it."
+                    )
+                } else {
+                    self.missing_status()
+                };
                 false
             }
         }
@@ -366,6 +378,37 @@ impl Shell {
             self.needs_redraw = true;
         } else {
             self.job = Some((kind, receiver));
+        }
+    }
+
+    /// Takes the thorough search's result when its thread has one.
+    fn poll_search(&mut self) {
+        let Some(receiver) = self.search.take() else {
+            return;
+        };
+        match receiver.try_recv() {
+            Ok(Some(folder)) => {
+                self.adopt(&folder);
+                self.status = format!(
+                    "Found Minecraft {VERSION} (Rust edition) at {}. Tap PLAY.",
+                    folder.display()
+                );
+                self.needs_redraw = true;
+            }
+            Ok(None) => {
+                self.status = format!(
+                    "No prepared Minecraft {VERSION} folder was found in Download, Documents, \
+                     this app's folders or a memory card. Tap DOWNLOAD & SET UP to install it \
+                     from Mojang. If you copied one into Download, allow all files access for \
+                     Morizen in Android Settings so the search can read it."
+                );
+                self.needs_redraw = true;
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => self.search = Some(receiver),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.status = "The device search stopped unexpectedly.".to_owned();
+                self.needs_redraw = true;
+            }
         }
     }
 
@@ -463,10 +506,18 @@ impl Shell {
                 }
             }
             Act::Search => {
-                self.status =
-                    format!("Searching this device for a prepared Minecraft {VERSION}...");
-                self.needs_redraw = true;
-                self.discover(true);
+                if self.search.is_none() && self.job.is_none() {
+                    self.status =
+                        format!("Searching this device for a prepared Minecraft {VERSION}...");
+                    self.needs_redraw = true;
+                    let paths = self.paths.clone();
+                    let (sender, receiver) = channel();
+                    std::thread::spawn(move || {
+                        let found = Shell::find(&paths, true);
+                        let _ = sender.send(found);
+                    });
+                    self.search = Some(receiver);
+                }
             }
             Act::Name => self.begin_edit(Field::Name),
             Act::SizeDown => self.resize_layout(-1.0),
@@ -651,31 +702,43 @@ impl Shell {
             y += 2.0 * ui;
             let bar = Rect::new(panel.x + 4.0 * ui, y, panel.w - 8.0 * ui, 3.0 * ui);
             painter.frame(bar, BACKGROUND, LINE);
-            let fraction = if progress.total == 0 {
-                0.0
+            if progress.phase == Phase::Client {
+                // One large file: show a block moving along the bar so a long download on a
+                // phone clearly still works.
+                let t = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|elapsed| (elapsed.as_millis() % 1500) as f32 / 1500.0)
+                    .unwrap_or(0.0);
+                let width = (bar.w - 2.0) * 0.25;
+                painter.rect(
+                    bar.x + 1.0 + (bar.w - 2.0 - width) * t,
+                    bar.y + 1.0,
+                    width,
+                    bar.h - 2.0,
+                    ACCENT,
+                );
             } else {
-                (progress.done as f32 / progress.total as f32).clamp(0.0, 1.0)
-            };
-            painter.rect(
-                bar.x + 1.0,
-                bar.y + 1.0,
-                (bar.w - 2.0) * fraction,
-                bar.h - 2.0,
-                ACCENT,
-            );
+                let fraction = if progress.total == 0 {
+                    0.0
+                } else {
+                    (progress.done as f32 / progress.total as f32).clamp(0.0, 1.0)
+                };
+                painter.rect(
+                    bar.x + 1.0,
+                    bar.y + 1.0,
+                    (bar.w - 2.0) * fraction,
+                    bar.h - 2.0,
+                    ACCENT,
+                );
+            }
             y += 5.0 * ui;
-            let label = format!(
-                "{} {}/{}",
-                match progress.phase {
-                    Phase::Manifest => "MANIFEST",
-                    Phase::Version => "VERSION",
-                    Phase::Client => "CLIENT",
-                    Phase::AssetIndex => "INDEX",
-                    Phase::Assets => "ASSETS",
-                },
-                progress.done,
-                progress.total
-            );
+            let label = match progress.phase {
+                Phase::Assets => format!("ASSETS {}/{}", progress.done, progress.total),
+                Phase::Client => "CLIENT JAR (large file, this can take a few minutes)".to_owned(),
+                Phase::Manifest => "VERSION MANIFEST".to_owned(),
+                Phase::Version => "VERSION FILE".to_owned(),
+                Phase::AssetIndex => "ASSET INDEX".to_owned(),
+            };
             painter.text(panel.x + 4.0 * ui, y, &label, 2.2 * ui, MUTED);
         }
 
@@ -684,7 +747,7 @@ impl Shell {
         let bx = (w - bw) / 2.0;
         let mut y = h * 0.55;
         let gap = 2.5 * ui;
-        let working = self.job.is_some();
+        let working = self.job.is_some() || self.search.is_some();
         let prepared = Self::is_prepared(&self.paths.prepared);
         let (label, act, enabled) = if !prepared {
             (
@@ -978,7 +1041,12 @@ impl ApplicationHandler for Shell {
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         self.poll_job();
-        event_loop.set_control_flow(if self.job.is_some() {
+        self.poll_search();
+        if self.job.is_some() {
+            // The moving block on a single large download needs frames to move.
+            self.needs_redraw = true;
+        }
+        event_loop.set_control_flow(if self.job.is_some() || self.search.is_some() {
             ControlFlow::Poll
         } else {
             ControlFlow::Wait
@@ -1224,6 +1292,33 @@ mod tests {
         let shell = Shell::new(paths);
         assert_eq!(shell.paths.prepared, root);
         assert!(shell.status.contains("Tap PLAY"), "{}", shell.status);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A thorough search that finds nothing says so, instead of repeating the same set-up text
+    /// (which made the button look dead).
+    #[test]
+    fn a_finished_search_reports_that_nothing_was_found() {
+        let dir = std::env::temp_dir().join(format!("morizen-shell-none-{}", std::process::id()));
+        let paths = Paths {
+            game: dir.join("game"),
+            prepared: dir.join("prepared").join(VERSION),
+            imported: None,
+            search: vec![dir.join("Download")],
+            tables: Some(dir.join("tables.zip")),
+        };
+        let mut shell = Shell::new(paths);
+        let (sender, receiver) = channel();
+        sender.send(None).unwrap();
+        shell.search = Some(receiver);
+        shell.poll_search();
+        assert!(shell.search.is_none());
+        assert!(shell.status.contains("No prepared"), "{}", shell.status);
+        assert!(
+            shell.status.contains("DOWNLOAD & SET UP"),
+            "{}",
+            shell.status
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
