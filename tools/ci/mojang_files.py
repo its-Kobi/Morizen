@@ -23,6 +23,7 @@ import sys
 import urllib.request
 
 MANIFEST_URL = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
+PACKAGES = "https://piston-meta.mojang.com/v1/packages"
 USER_AGENT = "Morizen-Android-CI/1.0 (+https://github.com/its-Kobi/Morizen)"
 CHUNK = 1 << 20
 
@@ -92,7 +93,11 @@ def main() -> int:
 
     versions = root / "versions" / version_id
     version_json = versions / f"{version_id}.json"
-    fetch_checked(entry["url"], version_json, entry["sha1"], None)
+    # Mojang republishes a version JSON now and then (the accepted list in the lock names the
+    # ones seen); the pinned file, which the toolchain is checked against, stays addressable by
+    # its SHA-1, so fetch exactly that one instead of whatever the manifest lists today.
+    pinned = lock["manifest_sha1"]
+    fetch_checked(f"{PACKAGES}/{pinned}/{version_id}.json", version_json, pinned, None)
     version = json.loads(version_json.read_text())
     downloads = version.get("downloads", {})
     for side, pinned in (("client", lock["client_sha1"]), ("server", lock["server_sha1"])):
