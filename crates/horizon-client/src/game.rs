@@ -15721,6 +15721,19 @@ impl Loading {
         if self.window.as_ref().is_none_or(|w| w.id() != id) {
             return;
         }
+        // The title screen while the resources load belongs to this handler, so a phone's taps
+        // become the pointer events the menu already understands.
+        #[cfg(feature = "touch-controls")]
+        if let WindowEvent::Touch(touch) = &event {
+            let (phase, at) = (touch.phase, touch.location);
+            for pointer in touch_controls::pointer_events(phase, at) {
+                if let Err(error) = self.menu_event(event_loop, pointer) {
+                    self.error = Some(error);
+                    event_loop.exit();
+                }
+            }
+            return;
+        }
         follow_keymap(&mut event);
         if let Err(error) = self.menu_event(event_loop, event) {
             self.error = Some(error);

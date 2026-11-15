@@ -7,6 +7,32 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use winit::event::{MouseButton, Touch, TouchPhase};
 
+/// A phone finger as the desktop pointer it stands for: where it is, and the left button down
+/// when it lands or up when it lifts. The startup screen and the title menu answer the same
+/// `CursorMoved`/`MouseInput` events as a mouse, so they need no touch code of their own.
+pub(super) fn pointer_events(
+    phase: TouchPhase,
+    at: winit::dpi::PhysicalPosition<f64>,
+) -> Vec<WindowEvent> {
+    let mut events = vec![WindowEvent::CursorMoved {
+        device_id: DeviceId::dummy(),
+        position: at,
+    }];
+    let state = match phase {
+        TouchPhase::Started => Some(ElementState::Pressed),
+        TouchPhase::Ended | TouchPhase::Cancelled => Some(ElementState::Released),
+        _ => None,
+    };
+    if let Some(state) = state {
+        events.push(WindowEvent::MouseInput {
+            device_id: DeviceId::dummy(),
+            state,
+            button: MouseButton::Left,
+        });
+    }
+    events
+}
+
 pub(super) struct TouchControls {
     pub layout: Layout,
     /// Android's virtual mouse: taps move a pointer and click instead of using the overlay.
@@ -128,33 +154,55 @@ impl Game<'_> {
             return Ok(());
         }
         if self.touch.mouse {
-            match touch.phase {
-                TouchPhase::Started if self.touch.mouse_finger.is_none() => {
-                    self.touch.mouse_finger = Some(touch.id);
-                    self.move_cursor(at[0], at[1])?;
-                    self.send_mouse(event_loop, id, ElementState::Pressed, MouseButton::Left)?;
-                }
-                TouchPhase::Moved if self.touch.mouse_finger == Some(touch.id) => {
-                    self.move_cursor(at[0], at[1])?;
-                }
-                TouchPhase::Ended | TouchPhase::Cancelled
-                    if self.touch.mouse_finger == Some(touch.id) =>
-                {
-                    self.touch.mouse_finger = None;
-                    self.send_mouse(event_loop, id, ElementState::Released, MouseButton::Left)?;
-                }
-                _ => {}
-            }
+            self.virtual_mouse(event_loop, id, touch, at)?;
             self.last_input = Instant::now();
             return Ok(());
         }
         let active =
             self.screen == Screen::Playing && self.title.is_none() && self.player.is_some();
+        // Off the in-game HUD there is no overlay to press, so the finger is the pointer: a tap
+        // moves the cursor there and clicks, exactly like the desktop mouse. Without this a
+        // phone can only look at the title screen and its menus.
+        if !active {
+            self.virtual_mouse(event_loop, id, touch, at)?;
+            self.last_input = Instant::now();
+            return Ok(());
+        }
         let events = self.touch.events(touch, screen, active);
         for event in events {
             self.apply_touch_event(event)?;
         }
         self.last_input = Instant::now();
+        Ok(())
+    }
+
+    /// One finger of the virtual mouse: press where the finger lands, drag the pointer while it
+    /// moves, release where it lifts. The press goes through the ordinary desktop handler, so
+    /// every menu, button, slider and inventory slot answers a phone tap like a real click.
+    fn virtual_mouse(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        id: WindowId,
+        touch: Touch,
+        at: [f32; 2],
+    ) -> Result<()> {
+        match touch.phase {
+            TouchPhase::Started if self.touch.mouse_finger.is_none() => {
+                self.touch.mouse_finger = Some(touch.id);
+                self.move_cursor(at[0], at[1])?;
+                self.send_mouse(event_loop, id, ElementState::Pressed, MouseButton::Left)?;
+            }
+            TouchPhase::Moved if self.touch.mouse_finger == Some(touch.id) => {
+                self.move_cursor(at[0], at[1])?;
+            }
+            TouchPhase::Ended | TouchPhase::Cancelled
+                if self.touch.mouse_finger == Some(touch.id) =>
+            {
+                self.touch.mouse_finger = None;
+                self.send_mouse(event_loop, id, ElementState::Released, MouseButton::Left)?;
+            }
+            _ => {}
+        }
         Ok(())
     }
 
