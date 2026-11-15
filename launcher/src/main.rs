@@ -46,8 +46,8 @@ mod worlds_page;
 use gpui::{
     actions, div, ease_out_quint, prelude::*, px, relative, size, Animation, AnimationExt,
     AnyElement, App, Application, Bounds, ClickEvent, Context, Div, ElementId, FocusHandle,
-    FontWeight, Hsla, KeyBinding, KeyDownEvent, Menu, MenuItem, SharedString, Stateful,
-    Subscription, Window, WindowBounds, WindowOptions,
+    FontWeight, Hsla, KeyBinding, KeyDownEvent, Menu, MenuItem, PathPromptOptions, SharedString,
+    Stateful, Subscription, Window, WindowBounds, WindowOptions,
 };
 use horizon_launcher::account::{self, Accounts, SignIn, SignInState};
 use horizon_launcher::backend::{self, Job, Msg, Release, Running, Settings, Updates};
