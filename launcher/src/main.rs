@@ -2491,19 +2491,19 @@ impl Launcher {
         } else if not_prepared {
             match (self.owner_shown(), no_install) {
                 (Some(true), true) => trf(
-                    "Not prepared. Press Download files to get Minecraft {version} from Mojang, or Check PC for files.",
+                    "Not prepared. Play downloads Minecraft {version} from Mojang for your account and prepares it.",
                     &[("version", &version)],
                 ),
                 (Some(true), false) => trf(
-                    "Not prepared. Press Download files to get Minecraft {version} from Mojang, or Check PC for files to use your own install.",
+                    "Not prepared. Play uses Minecraft {version} from your own install; you can also let Morizen download it from Mojang.",
                     &[("version", &version)],
                 ),
                 (_, false) => trf(
-                    "Not prepared. Press Check PC for files to use Minecraft {version} from your own install. Download files needs a Microsoft account that owns it.",
+                    "Not prepared. Play uses Minecraft {version} from your own install. No account needed; downloading it from Mojang needs a Microsoft account that owns it.",
                     &[("version", &version)],
                 ),
                 (_, true) => trf(
-                    "Not prepared. Press Check PC for files to find an install with {version}, or Download files. Downloading needs an account that owns it.",
+                    "Not prepared. Choose a Minecraft install that has {version}. Playing needs no account; downloading it from Mojang needs one that owns it.",
                     &[("version", &version)],
                 ),
             }

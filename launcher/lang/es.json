@@ -97,11 +97,9 @@
   "Choose a version": "Elegir una versión",
   "Host a server": "Alojar un servidor",
   "Preparing…": "Preparando…",
-  "Prepare": "Preparar",
   "Prepare again": "Preparar de nuevo",
   "Ready to play": "Listo para jugar",
   "Resources": "Recursos",
-  "Minecraft folder": "Carpeta de Minecraft",
   "Choose…": "Elegir…",
   "Playing offline": "Jugando sin conexión",
   "Accounts…": "Cuentas…",
@@ -160,8 +158,6 @@
   "Not now": "Ahora no",
   "Your worlds, offline names and settings stay where they are.": "Tus mundos, nombres sin conexión y ajustes se mantienen en su lugar.",
   "Open {link} in your browser and enter this code:": "Abre {link} en tu navegador e introduce este código:",
-  "From my install": "Desde mi instalación",
-  "Download and prepare": "Descargar y preparar",
   "Not prepared. Play downloads Minecraft {version} from Mojang for your account and prepares it.": "Sin preparar. Jugar descarga Minecraft {version} de Mojang para tu cuenta y lo prepara.",
   "Cancel": "Cancelar",
   "Native mods (experimental)": "Mods nativos (experimental)",
@@ -195,7 +191,7 @@
   "Optional. Online servers such as Hypixel need a Microsoft account; playing offline needs none.": "Opcional. Servidores en línea como Hypixel necesitan una cuenta de Microsoft; jugar sin conexión no necesita ninguna.",
   "This build of the launcher has no Microsoft sign-in (HORIZON_MSA_CLIENT_ID): playing offline works, but online servers and downloading Minecraft from Mojang need one.": "Esta versión del launcher no tiene inicio de sesión de Microsoft (HORIZON_MSA_CLIENT_ID): jugar sin conexión funciona, pero los servidores en línea y la descarga de Minecraft desde Mojang necesitan una.",
   "Not prepared. Choose a Minecraft install that has {version}. Playing needs no account; downloading it from Mojang needs one that owns it.": "Sin preparar. Elige una instalación de Minecraft que tenga {version}. No necesitas una cuenta para jugar; para descargarlo de Mojang necesitas una que lo posea.",
-  "No local Minecraft install was found. Morizen can download it from Mojang for your account.": "No se encontró una instalación local de Minecraft. Morizen puede descargarla de Mojang para tu cuenta.",
-  "No local Minecraft install was found. Choose its folder, or sign in to download it from Mojang.": "No se encontró una instalación local de Minecraft. Elige su carpeta o inicia sesión para descargarla de Mojang.",
-  "Sign in with a Microsoft account that owns Minecraft: Java Edition": "Inicia sesión con una cuenta de Microsoft que posea Minecraft: Java Edition"
+  "Sign in with a Microsoft account that owns Minecraft: Java Edition": "Inicia sesión con una cuenta de Microsoft que posea Minecraft: Java Edition",
+  "Download files": "Descargar archivos",
+  "Check PC for files": "Buscar archivos en el PC"
 }

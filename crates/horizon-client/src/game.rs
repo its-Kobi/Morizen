@@ -13331,7 +13331,7 @@ impl ApplicationHandler for Game<'_> {
         let result: Result<()> = (|| {
             #[cfg(feature = "touch-controls")]
             if let WindowEvent::Touch(touch) = &event {
-                self.touch_event(event_loop, _id, *touch)?;
+                self.touch_event(event_loop, id, *touch)?;
                 return Ok(());
             }
             match event {
