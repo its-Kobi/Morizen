@@ -99,6 +99,15 @@ jobs:
           path: crates/morizen-android/assets
       - name: Install the Rust APK packager
         run: cargo install cargo-apk --version 0.10.0 --locked
+      # cargo-apk signs with `~/.android/debug.keystore` and generates a new one when it is
+      # missing. A fresh runner has none, so every release would carry a different signature and
+      # Android refuses to update an installed Morizen ("App not installed"). The first keystore
+      # stays in the cache, so every later build is signed with the same key.
+      - name: Keep the APK signing key between builds
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: morizen-android-debug-keystore-v1
       - name: Build the arm64 APK
         run: cargo apk build --manifest-path crates/morizen-android/Cargo.toml
       - uses: actions/upload-artifact@v4
