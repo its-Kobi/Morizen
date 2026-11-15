@@ -6247,12 +6247,20 @@ impl Game<'_> {
         self.draw_debug_overlay(&mut batch, size);
         self.frame_graph
             .draw(self.settings.horizon.overlay, &mut batch, &self.gui.atlas);
+        batch
+    }
+
+    /// Every layer over the world. Android's overlay draws last so its mouse button stays on
+    /// top of the title screen and of every menu, not just the in-game HUD.
+    fn hud_layers(&mut self, size: [u32; 2]) -> HudBatch {
+        let mut batch = self.hud_layers_inner(size);
         #[cfg(feature = "touch-controls")]
         self.draw_touch_controls(&mut batch);
         self.draw_pad_cursor(&mut batch);
         batch
     }
-    fn hud_layers(&mut self, size: [u32; 2]) -> HudBatch {
+
+    fn hud_layers_inner(&mut self, size: [u32; 2]) -> HudBatch {
         let mut batch = HudBatch::new(size);
         let (w, h) = (batch.width, batch.height);
         if self.screen == Screen::Win {
@@ -12771,6 +12779,61 @@ impl Game<'_> {
         Ok(())
     }
     /// A mouse button while playing (window or control socket).
+    /// Whether Android's virtual mouse is on: a press then clicks where the pointer is instead
+    /// of grabbing the game's pointer.
+    fn touch_mouse_mode(&self) -> bool {
+        #[cfg(feature = "touch-controls")]
+        {
+            self.touch.mouse
+        }
+        #[cfg(not(feature = "touch-controls"))]
+        {
+            false
+        }
+    }
+
+    /// `MouseHandler.onMove` for a pointer at a physical window position. The desktop pointer
+    /// and Android's virtual mouse both come through here, so dragging a slider on a phone
+    /// behaves exactly like dragging with a mouse.
+    fn move_cursor(&mut self, x: f32, y: f32) -> Result<()> {
+        let Some(r) = &self.renderer else {
+            return Ok(());
+        };
+        let b = HudBatch::new([r.config.width, r.config.height]);
+        self.cursor = (x / b.scale, y / b.scale);
+        if self.dialog_open() {
+            self.dialog_drag();
+        }
+        if self.screen == Screen::Advancements {
+            self.advancements_drag();
+        }
+        if self.screen == Screen::Stats {
+            self.stats_drag();
+        }
+        if self.screen == Screen::WorldOptions {
+            self.world_options_drag();
+        }
+        if self.screen == Screen::Creative {
+            let (_, oy) = Self::creative_origin(&b);
+            self.creative_screen.drag_scrollbar(self.cursor.1 - oy);
+        }
+        if self.screen == Screen::Inventory {
+            self.loom_drag();
+        }
+        if matches!(self.screen, Screen::Inventory | Screen::Creative) {
+            self.inventory_drag_move();
+        }
+        if let Some(title) = &mut self.title {
+            title.drag(self.cursor, (b.width, b.height));
+            title.drag_field(&self.gui.atlas, self.cursor.0);
+        }
+        if self.dragging && self.screen == Screen::Options {
+            let _ = b;
+            self.options_drag()?;
+        }
+        Ok(())
+    }
+
     fn play_mouse(&mut self, button: MouseButton, pressed: bool) -> Result<()> {
         if self.sleeping.is_some() {
             return Ok(());
@@ -13268,7 +13331,7 @@ impl ApplicationHandler for Game<'_> {
         let result: Result<()> = (|| {
             #[cfg(feature = "touch-controls")]
             if let WindowEvent::Touch(touch) = &event {
-                self.touch_event(*touch)?;
+                self.touch_event(event_loop, _id, *touch)?;
                 return Ok(());
             }
             match event {
@@ -13292,40 +13355,7 @@ impl ApplicationHandler for Game<'_> {
                     }
                 }
                 WindowEvent::CursorMoved { position, .. } => {
-                    if let Some(r) = &self.renderer {
-                        let b = HudBatch::new([r.config.width, r.config.height]);
-                        self.cursor = (position.x as f32 / b.scale, position.y as f32 / b.scale);
-                        if self.dialog_open() {
-                            self.dialog_drag();
-                        }
-                        if self.screen == Screen::Advancements {
-                            self.advancements_drag();
-                        }
-                        if self.screen == Screen::Stats {
-                            self.stats_drag();
-                        }
-                        if self.screen == Screen::WorldOptions {
-                            self.world_options_drag();
-                        }
-                        if self.screen == Screen::Creative {
-                            let (_, oy) = Self::creative_origin(&b);
-                            self.creative_screen.drag_scrollbar(self.cursor.1 - oy);
-                        }
-                        if self.screen == Screen::Inventory {
-                            self.loom_drag();
-                        }
-                        if matches!(self.screen, Screen::Inventory | Screen::Creative) {
-                            self.inventory_drag_move();
-                        }
-                        if let Some(title) = &mut self.title {
-                            title.drag(self.cursor, (b.width, b.height));
-                            title.drag_field(&self.gui.atlas, self.cursor.0);
-                        }
-                        if self.dragging && self.screen == Screen::Options {
-                            let _ = b;
-                            self.options_drag()?;
-                        }
-                    }
+                    self.move_cursor(position.x as f32, position.y as f32)?;
                 }
                 WindowEvent::MouseWheel { delta, .. } => {
                     let (raw_x, raw_y) = match delta {
@@ -13570,7 +13600,7 @@ impl ApplicationHandler for Game<'_> {
                     }
                     match self.screen {
                         Screen::Playing => {
-                            if pressed && !self.captured {
+                            if pressed && !self.captured && !self.touch_mouse_mode() {
                                 self.capture(true);
                                 return Ok(());
                             }

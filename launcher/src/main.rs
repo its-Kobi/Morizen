@@ -46,8 +46,8 @@ mod worlds_page;
 use gpui::{
     actions, div, ease_out_quint, prelude::*, px, relative, size, Animation, AnimationExt,
     AnyElement, App, Application, Bounds, ClickEvent, Context, Div, ElementId, FocusHandle,
-    FontWeight, Hsla, KeyBinding, KeyDownEvent, Menu, MenuItem, PathPromptOptions, SharedString,
-    Stateful, Subscription, Window, WindowBounds, WindowOptions,
+    FontWeight, Hsla, KeyBinding, KeyDownEvent, Menu, MenuItem, SharedString, Stateful,
+    Subscription, Window, WindowBounds, WindowOptions,
 };
 use horizon_launcher::account::{self, Accounts, SignIn, SignInState};
 use horizon_launcher::backend::{self, Job, Msg, Release, Running, Settings, Updates};
@@ -1251,27 +1251,6 @@ impl Launcher {
             old.cancel();
         }
         self.sign_in_state = Some(SignInState::Starting);
-    }
-
-    fn choose_folder(&mut self, cx: &mut Context<Self>) {
-        let paths = cx.prompt_for_paths(PathPromptOptions {
-            files: false,
-            directories: true,
-            multiple: false,
-            prompt: Some("Choose".into()),
-        });
-        cx.spawn(async move |this, cx| {
-            if let Ok(Ok(Some(mut paths))) = paths.await {
-                if let Some(path) = paths.pop() {
-                    let _ = this.update(cx, |this, cx| {
-                        this.settings.minecraft_dir = Some(path);
-                        this.settings.save();
-                        cx.notify();
-                    });
-                }
-            }
-        })
-        .detach();
     }
 }
 
@@ -2512,98 +2491,52 @@ impl Launcher {
         } else if not_prepared {
             match (self.owner_shown(), no_install) {
                 (Some(true), true) => trf(
-                    "Not prepared. Play downloads Minecraft {version} from Mojang for your account and prepares it.",
+                    "Not prepared. Press Download files to get Minecraft {version} from Mojang, or Check PC for files.",
                     &[("version", &version)],
                 ),
                 (Some(true), false) => trf(
-                    "Not prepared. Play uses Minecraft {version} from your own install; you can also let Morizen download it from Mojang.",
+                    "Not prepared. Press Download files to get Minecraft {version} from Mojang, or Check PC for files to use your own install.",
                     &[("version", &version)],
                 ),
                 (_, false) => trf(
-                    "Not prepared. Play uses Minecraft {version} from your own install. No account needed; downloading it from Mojang needs a Microsoft account that owns it.",
+                    "Not prepared. Press Check PC for files to use Minecraft {version} from your own install. Download files needs a Microsoft account that owns it.",
                     &[("version", &version)],
                 ),
                 (_, true) => trf(
-                    "Not prepared. Choose a Minecraft install that has {version}. Playing needs no account; downloading it from Mojang needs one that owns it.",
+                    "Not prepared. Press Check PC for files to find an install with {version}, or Download files. Downloading needs an account that owns it.",
                     &[("version", &version)],
                 ),
             }
         } else {
             backend::resources_summary(prepared, !silent, &version)
         };
-        let mut prepare = button(
-            "prepare",
-            if prepared { "Prepare again" } else { "Prepare" },
-            if prepared && !silent {
-                Kind::Ghost
-            } else {
-                Kind::Secondary
-            },
-            &t,
-        );
+        // Two buttons like the phone app: get the files from Mojang, or look for the files the
+        // player already has on this computer. No folder picker and no account wording to trip
+        // over; each button does the whole job.
+        let mut download = button("prepare-download", "Download files", Kind::Secondary, &t);
+        let mut check = button("prepare-install", "Check PC for files", Kind::Ghost, &t);
         if self.preparing {
-            prepare = disabled(prepare);
+            download = disabled(download);
+            check = disabled(check);
         } else {
-            prepare = prepare.on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+            download = download.on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                match this.owner_shown() {
+                    Some(true) => this.prepare(backend::MinecraftFrom::Mojang),
+                    _ => this.sign_in_to_play(),
+                }
+                cx.notify();
+            }));
+            check = check.on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                 this.prepare(backend::MinecraftFrom::Install);
                 cx.notify();
             }));
         }
-        let from_install = button("prepare-install", "From my install", Kind::Ghost, &t).on_click(
-            cx.listener(|this, _: &ClickEvent, _, cx| {
-                this.prepare(backend::MinecraftFrom::Install);
-                cx.notify();
-            }),
-        );
-        let prepare = if !not_prepared {
-            div().child(prepare)
-        } else {
-            let row = div().flex().items_center().gap(px(8.)).child(from_install);
-            match self.owner_shown() {
-                Some(true) => row.child(
-                    button(
-                        "prepare-download",
-                        "Download and prepare",
-                        Kind::Secondary,
-                        &t,
-                    )
-                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                        this.prepare(backend::MinecraftFrom::Mojang);
-                        cx.notify();
-                    })),
-                ),
-                _ => row.child(
-                    button(
-                        "prepare-sign-in",
-                        "Sign in to download",
-                        Kind::Secondary,
-                        &t,
-                    )
-                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                        this.sign_in_to_play();
-                        cx.notify();
-                    })),
-                ),
-            }
-        };
-        let owner = self.owner == Some(true);
-        let minecraft = self.settings.minecraft_dir.as_deref().map_or_else(
-            || {
-                div()
-                    .child(if owner {
-                        tr("No local Minecraft install was found. Morizen can download it from Mojang for your account.")
-                    } else {
-                        tr("No local Minecraft install was found. Choose its folder, or sign in to download it from Mojang.")
-                    })
-                    .into_any_element()
-            },
-            |p| {
-                div()
-                    .font_family(theme::MONO)
-                    .child(short(p))
-                    .into_any_element()
-            },
-        );
+        let prepare = div()
+            .flex()
+            .items_center()
+            .gap(px(8.))
+            .child(download)
+            .child(check);
         let mut rows = div()
             .flex()
             .flex_col()
@@ -2626,23 +2559,11 @@ impl Launcher {
                 None,
                 &t,
             )),
-            None => rows
-                .child(index_row(
-                    2,
-                    tr("Resources"),
-                    Some(div().child(resources_value).into_any_element()),
-                    Some(prepare.into_any_element()),
-                    &t,
-                ))
-                .child(index_row(
-                3,
-                tr("Minecraft folder"),
-                Some(minecraft),
-                Some(
-                    button("choose-mc", "Choose…", Kind::Ghost, &t)
-                        .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.choose_folder(cx)))
-                        .into_any_element(),
-                ),
+            None => rows.child(index_row(
+                2,
+                tr("Resources"),
+                Some(div().child(resources_value).into_any_element()),
+                Some(prepare.into_any_element()),
                 &t,
             )),
         };

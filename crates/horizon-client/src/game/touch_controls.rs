@@ -9,6 +9,12 @@ use winit::event::{MouseButton, Touch, TouchPhase};
 
 pub(super) struct TouchControls {
     pub layout: Layout,
+    /// Android's virtual mouse: taps move a pointer and click instead of using the overlay.
+    pub mouse: bool,
+    /// The finger dragging the virtual mouse, so a second finger cannot move it.
+    mouse_finger: Option<u64>,
+    /// The finger that pressed the mouse-mode button; its release must not click.
+    toggle_finger: Option<u64>,
     fingers: Touches,
     held: HashMap<TouchAction, usize>,
     path: PathBuf,
@@ -19,10 +25,24 @@ impl TouchControls {
         let path = game_dir.join("touch-controls.json");
         Self {
             layout: Layout::load(&path),
+            mouse: false,
+            mouse_finger: None,
+            toggle_finger: None,
             fingers: Touches::default(),
             held: HashMap::new(),
             path,
         }
+    }
+
+    /// The mouse-mode button: top right, always the same place on every screen.
+    pub fn toggle_bounds(screen: [f32; 2], scale: f32) -> [f32; 4] {
+        let side = 0.075 * scale * screen[0].min(screen[1]);
+        [screen[0] - side, 0.0, side, side]
+    }
+
+    pub fn toggle_hit(&self, at: [f32; 2], screen: [f32; 2]) -> bool {
+        let [x, y, w, h] = Self::toggle_bounds(screen, self.layout.scale);
+        at[0] >= x && at[0] <= x + w && at[1] >= y && at[1] <= y + h
     }
 
     #[allow(dead_code)] // Used by the touch-controls options editor as it lands.
@@ -79,12 +99,55 @@ impl TouchControls {
 }
 
 impl Game<'_> {
-    pub(super) fn touch_event(&mut self, touch: Touch) -> Result<()> {
+    pub(super) fn touch_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        id: WindowId,
+        touch: Touch,
+    ) -> Result<()> {
         let screen = self
             .renderer
             .as_ref()
             .map(|r| [r.config.width as f32, r.config.height as f32])
             .unwrap_or([1.0, 1.0]);
+        let at = [touch.location.x as f32, touch.location.y as f32];
+        // The mouse-mode button is always live, on the title screen and on every menu, so a
+        // phone can leave a menu that has no other way out.
+        if touch.phase == TouchPhase::Started && self.touch.toggle_hit(at, screen) {
+            self.release_touch_controls();
+            self.touch.mouse = !self.touch.mouse;
+            self.touch.mouse_finger = None;
+            self.touch.toggle_finger = Some(touch.id);
+            self.last_input = Instant::now();
+            return Ok(());
+        }
+        if self.touch.toggle_finger == Some(touch.id) {
+            if matches!(touch.phase, TouchPhase::Ended | TouchPhase::Cancelled) {
+                self.touch.toggle_finger = None;
+            }
+            return Ok(());
+        }
+        if self.touch.mouse {
+            match touch.phase {
+                TouchPhase::Started if self.touch.mouse_finger.is_none() => {
+                    self.touch.mouse_finger = Some(touch.id);
+                    self.move_cursor(at[0], at[1])?;
+                    self.send_mouse(event_loop, id, ElementState::Pressed, MouseButton::Left)?;
+                }
+                TouchPhase::Moved if self.touch.mouse_finger == Some(touch.id) => {
+                    self.move_cursor(at[0], at[1])?;
+                }
+                TouchPhase::Ended | TouchPhase::Cancelled
+                    if self.touch.mouse_finger == Some(touch.id) =>
+                {
+                    self.touch.mouse_finger = None;
+                    self.send_mouse(event_loop, id, ElementState::Released, MouseButton::Left)?;
+                }
+                _ => {}
+            }
+            self.last_input = Instant::now();
+            return Ok(());
+        }
         let active =
             self.screen == Screen::Playing && self.title.is_none() && self.player.is_some();
         let events = self.touch.events(touch, screen, active);
@@ -95,7 +158,30 @@ impl Game<'_> {
         Ok(())
     }
 
+    /// Feeds a virtual mouse press through the ordinary desktop handler, so every menu,
+    /// button, slider and inventory slot answers a phone tap exactly like a pointer click.
+    fn send_mouse(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        id: WindowId,
+        state: ElementState,
+        button: MouseButton,
+    ) -> Result<()> {
+        self.window_event(
+            event_loop,
+            id,
+            WindowEvent::MouseInput {
+                device_id: DeviceId::dummy(),
+                state,
+                button,
+            },
+        );
+        Ok(())
+    }
+
     pub(super) fn release_touch_controls(&mut self) {
+        self.touch.mouse_finger = None;
+        self.touch.toggle_finger = None;
         let events = self.touch.release_all();
         for event in events {
             let _ = self.apply_touch_event(event);
@@ -150,38 +236,97 @@ impl Game<'_> {
     }
 
     pub(super) fn draw_touch_controls(&mut self, batch: &mut HudBatch) {
-        if self.screen != Screen::Playing || self.title.is_some() || self.player.is_none() {
-            return;
-        }
         let atlas = &self.gui.atlas;
         let screen = [batch.width * batch.scale, batch.height * batch.scale];
-        let alpha = (self.touch.layout.opacity * 190.0).round() as u8;
-        for button in &self.touch.layout.buttons {
-            let [x, y, w, h] = button.bounds(screen, self.touch.layout.scale);
-            let [x, y, w, h] = [x, y, w, h].map(|value| value / batch.scale);
-            let down = self.touch.held.contains_key(&button.action);
-            let fill = if down {
-                rgba(212, 162, 76, alpha)
-            } else {
-                rgba(15, 18, 24, alpha)
-            };
-            batch.fill(atlas, x, y, w, h, fill);
-            let border = rgba(255, 255, 255, alpha.saturating_add(35));
-            let edge = 1.0;
-            batch.fill(atlas, x, y, w, edge, border);
-            batch.fill(atlas, x, y + h - edge, w, edge, border);
-            batch.fill(atlas, x, y, edge, h, border);
-            batch.fill(atlas, x + w - edge, y, edge, h, border);
-            let tw = HudBatch::text_width(atlas, &button.label);
-            batch.text(
-                atlas,
-                &button.label,
-                x + (w - tw) / 2.0,
-                y + (h - 8.0) / 2.0,
-                u32::MAX,
-                true,
-            );
+        let playing =
+            self.screen == Screen::Playing && self.title.is_none() && self.player.is_some();
+        if playing {
+            let alpha = (self.touch.layout.opacity * 190.0).round() as u8;
+            for button in &self.touch.layout.buttons {
+                let [x, y, w, h] = button.bounds(screen, self.touch.layout.scale);
+                let [x, y, w, h] = [x, y, w, h].map(|value| value / batch.scale);
+                let down = self.touch.held.contains_key(&button.action);
+                let fill = if down {
+                    rgba(212, 162, 76, alpha)
+                } else {
+                    rgba(15, 18, 24, alpha)
+                };
+                batch.fill(atlas, x, y, w, h, fill);
+                let border = rgba(255, 255, 255, alpha.saturating_add(35));
+                let edge = 1.0;
+                batch.fill(atlas, x, y, w, edge, border);
+                batch.fill(atlas, x, y + h - edge, w, edge, border);
+                batch.fill(atlas, x, y, edge, h, border);
+                batch.fill(atlas, x + w - edge, y, edge, h, border);
+                let tw = HudBatch::text_width(atlas, &button.label);
+                batch.text(
+                    atlas,
+                    &button.label,
+                    x + (w - tw) / 2.0,
+                    y + (h - 8.0) / 2.0,
+                    u32::MAX,
+                    true,
+                );
+            }
         }
+        // The mouse button is drawn over every screen, so the title, options and every menu
+        // have a way to be pressed on a phone.
+        let [x, y, w, h] =
+            TouchControls::toggle_bounds(screen, self.touch.layout.scale).map(|v| v / batch.scale);
+        let active = self.touch.mouse;
+        let fill = if active {
+            rgba(212, 162, 76, 210)
+        } else {
+            rgba(15, 18, 24, 165)
+        };
+        batch.fill(atlas, x, y, w, h, fill);
+        let border = rgba(255, 255, 255, 210);
+        let edge = 1.0;
+        batch.fill(atlas, x, y, w, edge, border);
+        batch.fill(atlas, x, y + h - edge, w, edge, border);
+        batch.fill(atlas, x, y, edge, h, border);
+        batch.fill(atlas, x + w - edge, y, edge, h, border);
+        let tw = HudBatch::text_width(atlas, "MOUSE");
+        batch.text(
+            atlas,
+            "MOUSE",
+            x + (w - tw) / 2.0,
+            y + (h - 8.0) / 2.0,
+            u32::MAX,
+            true,
+        );
+        if active {
+            draw_pointer(batch, atlas, self.cursor);
+        }
+    }
+}
+
+/// The virtual mouse: a small outlined arrow at the pointer's HUD position.
+fn draw_pointer(batch: &mut HudBatch, atlas: &HudAtlas, at: (f32, f32)) {
+    let (x, y) = (at.0.floor(), at.1.floor());
+    const ROWS: [u8; 10] = [1, 2, 3, 4, 5, 6, 7, 4, 2, 1];
+    for (i, &w) in ROWS.iter().enumerate() {
+        let row = y + i as f32;
+        batch.fill(
+            atlas,
+            x - 1.0,
+            row,
+            f32::from(w) + 2.0,
+            1.0,
+            rgba(0, 0, 0, 230),
+        );
+    }
+    batch.fill(atlas, x - 1.0, y + 10.0, 2.0, 1.0, rgba(0, 0, 0, 230));
+    for (i, &w) in ROWS.iter().enumerate().skip(1).take(8) {
+        let row = y + i as f32;
+        batch.fill(
+            atlas,
+            x,
+            row,
+            f32::from(w) - 1.0,
+            1.0,
+            rgba(255, 255, 255, 240),
+        );
     }
 }
 
