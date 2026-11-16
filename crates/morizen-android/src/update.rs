@@ -7,8 +7,10 @@
 use std::io::{Read, Write};
 use std::path::Path;
 
-/// The release feed: the newest published Morizen release with its assets.
-const LATEST: &str = "https://api.github.com/repos/its-Kobi/Morizen/releases/latest";
+/// The release feed: the newest published Morizen releases with their assets. GitHub's `latest`
+/// alias is not used: the launcher's own `release-launcher` tag is marked latest, and it carries no
+/// version number.
+const FEED: &str = "https://api.github.com/repos/its-Kobi/Morizen/releases?per_page=30";
 /// The APK inside it. The app is built for arm64 only, so that is the one to take.
 const ASSET: &str = "morizen-android-arm64.apk";
 /// This build's version, from `Cargo.toml`: what the release's tag is compared with.
@@ -34,19 +36,25 @@ fn agent() -> ureq::Agent {
 /// this build is the newest one.
 pub fn check() -> Result<Option<Release>, String> {
     let body = agent()
-        .get(LATEST)
+        .get(FEED)
         .call()
         .map_err(|e| format!("GitHub did not answer: {e}"))?
         .into_string()
         .map_err(|e| format!("GitHub's answer was unreadable: {e}"))?;
-    let release: serde_json::Value =
+    let releases: serde_json::Value =
         serde_json::from_str(&body).map_err(|e| format!("GitHub's answer was unreadable: {e}"))?;
+    let list = releases
+        .as_array()
+        .ok_or("GitHub's answer was unreadable: it has no list of releases")?;
+    let Some(release) = newest(list) else {
+        return Ok(None);
+    };
     let tag = release
         .get("tag_name")
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default();
     let version = tag.trim_start_matches(['v', 'V']).to_owned();
-    if version.is_empty() || !newer(&version, VERSION) {
+    if !newer(&version, VERSION) {
         return Ok(None);
     }
     let asset = release
@@ -77,6 +85,37 @@ pub fn check() -> Result<Option<Release>, String> {
 /// ignored, so `v1.0.4` is newer than `1.0.3` and `1.0.4-beta.2` counts as newer too.
 pub fn newer(a: &str, b: &str) -> bool {
     numbers(a) > numbers(b)
+}
+
+/// The newest numbered, published release of `list`, ignoring drafts, pre-releases and tags that
+/// name no version (the launcher's own `release-launcher`). `list` is GitHub's release feed, newest
+/// first, but the numbers decide rather than the order.
+fn newest(list: &[serde_json::Value]) -> Option<&serde_json::Value> {
+    let mut best: Option<(Vec<u64>, &serde_json::Value)> = None;
+    for release in list {
+        let flag = |key: &str| {
+            release
+                .get(key)
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+        };
+        if flag("draft") || flag("prerelease") {
+            continue;
+        }
+        let tag = release
+            .get("tag_name")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        let version = tag.trim_start_matches(['v', 'V']);
+        if !version.starts_with(|c: char| c.is_ascii_digit()) {
+            continue;
+        }
+        let key = numbers(version);
+        if best.as_ref().is_none_or(|(seen, _)| key > *seen) {
+            best = Some((key, release));
+        }
+    }
+    best.map(|(_, release)| release)
 }
 
 fn numbers(version: &str) -> Vec<u64> {
@@ -136,7 +175,7 @@ pub fn download(
 
 #[cfg(test)]
 mod tests {
-    use super::newer;
+    use super::{newer, newest};
 
     #[test]
     fn a_later_tag_is_newer_and_the_same_one_is_not() {
@@ -147,5 +186,24 @@ mod tests {
         assert!(!newer("v1.0.3", "1.0.3"));
         assert!(!newer("1.0.2", "1.0.3"));
         assert!(!newer("", "1.0.3"));
+    }
+
+    /// The feed's first release can be the launcher's own `release-launcher` tag (GitHub's
+    /// "latest"); the numbered one is what the app installs.
+    #[test]
+    fn the_newest_numbered_release_wins_and_unnumbered_tags_are_skipped() {
+        let body = r#"[
+            {"tag_name": "release-launcher", "draft": false, "prerelease": false},
+            {"tag_name": "v1.0.5", "draft": false, "prerelease": false},
+            {"tag_name": "v1.0.9", "draft": true, "prerelease": false},
+            {"tag_name": "v2.0.0", "draft": false, "prerelease": true},
+            {"tag_name": "v1.0.4", "draft": false, "prerelease": false}
+        ]"#;
+        let list: serde_json::Value = serde_json::from_str(body).unwrap();
+        let picked = newest(list.as_array().unwrap()).unwrap();
+        assert_eq!(
+            picked.get("tag_name").and_then(|t| t.as_str()),
+            Some("v1.0.5")
+        );
     }
 }

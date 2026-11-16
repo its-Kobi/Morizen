@@ -164,8 +164,6 @@ pub struct Shell {
     newer: Option<update::Release>,
     /// The release check running on its own thread.
     update_check: Option<Receiver<Result<Option<update::Release>, String>>>,
-    /// A downloaded update APK waiting for the player to confirm the install.
-    update_apk: Option<PathBuf>,
     /// Whether the startup check has already started.
     checked_update: bool,
 }
@@ -201,7 +199,6 @@ impl Shell {
             auto_started: false,
             newer: None,
             update_check: None,
-            update_apk: None,
             checked_update: false,
         };
         shell.discover(false);
@@ -405,7 +402,13 @@ impl Shell {
                         }
                     );
                     if kind == JobKind::Update {
-                        self.update_apk = None;
+                        // A stopped download leaves a partial file: never offer that to the
+                        // installer.
+                        if let Some(release) = &self.newer
+                            && let Some(apk) = self.update_path(&release.version)
+                        {
+                            let _ = std::fs::remove_file(apk);
+                        }
                     }
                     finished = true;
                 }
@@ -564,12 +567,13 @@ impl Shell {
     }
 
     /// Where a downloaded APK is kept: this app's external files folder, which the installer can
-    /// read without a content provider.
-    fn update_path(&self) -> Option<PathBuf> {
-        self.paths.external.as_ref().map(|dir| {
-            dir.join("updates")
-                .join(format!("morizen-{}.apk", update::VERSION))
-        })
+    /// read without a content provider. The name carries the release's version, so a later release
+    /// never reuses an older file.
+    fn update_path(&self, version: &str) -> Option<PathBuf> {
+        self.paths
+            .external
+            .as_ref()
+            .map(|dir| dir.join("updates").join(format!("morizen-{version}.apk")))
     }
 
     /// The update row's tap: download the release, then open Android's installer for the APK.
@@ -584,7 +588,10 @@ impl Shell {
             self.check_update();
             return;
         };
-        if let Some(apk) = self.update_apk.clone().filter(|apk| apk.is_file()) {
+        if let Some(apk) = self
+            .update_path(&release.version)
+            .filter(|apk| apk.is_file())
+        {
             match install::start(&apk) {
                 Ok(()) => {
                     self.status =
@@ -595,14 +602,13 @@ impl Shell {
             self.needs_redraw = true;
             return;
         }
-        let Some(to) = self.update_path() else {
+        let Some(to) = self.update_path(&release.version) else {
             self.status = "This device gave the app no folder for the update.".to_owned();
             self.needs_redraw = true;
             return;
         };
         let version = release.version.clone();
         let to_thread = to.clone();
-        self.update_apk = Some(to);
         self.start_job(
             JobKind::Update,
             format!("Downloading Morizen {version}…"),
@@ -1060,7 +1066,9 @@ impl Shell {
         // The update row: only when GitHub has something newer, and always tappable to finish an
         // already-downloaded release.
         if let Some(release) = &self.newer {
-            let ready = self.update_apk.as_ref().is_some_and(|apk| apk.is_file());
+            let ready = self
+                .update_path(&release.version)
+                .is_some_and(|apk| apk.is_file());
             let (label, note) = if ready {
                 ("INSTALL UPDATE", release.version.clone())
             } else if self.job.is_some() {
