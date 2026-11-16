@@ -196,7 +196,8 @@ pub struct Settings {
 }
 impl Default for Settings {
     fn default() -> Self {
-        Self {
+        #[allow(unused_mut)]
+        let mut settings = Self {
             fov: 70.0,
             render_distance: 12,
             simulation_distance: 12,
@@ -273,7 +274,31 @@ impl Default for Settings {
             extras: Default::default(),
             mods: Default::default(),
             shader_packs: Vec::new(),
-        }
+        };
+        #[cfg(target_os = "android")]
+        settings.mobile_preset();
+        settings
+    }
+}
+
+/// A phone's first launch: the same preset `options_file` gives a fresh Android `options.txt`,
+/// applied to the typed settings too, because a fresh install has no options.txt to read.
+impl Settings {
+    #[cfg(target_os = "android")]
+    fn mobile_preset(&mut self) {
+        self.render_distance = 4;
+        self.simulation_distance = 5;
+        self.graphics_preset = "fast".into();
+        self.clouds = "false".into();
+        self.cloud_range = 32;
+        self.entity_shadows = false;
+        self.particles = 2;
+        self.biome_blend = 0;
+        self.mipmap_levels = 2;
+        self.max_fps = 60;
+        self.weather_radius = 5;
+        self.entity_distance = 0.5;
+        self.menu_blur = 0;
     }
 }
 fn put_f(f: &mut OptionsFile, key: &str, v: f32) {

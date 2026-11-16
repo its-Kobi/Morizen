@@ -404,7 +404,8 @@ pub struct Graphics {
 }
 impl Default for Graphics {
     fn default() -> Self {
-        Self {
+        #[allow(unused_mut)]
+        let mut graphics = Self {
             preset: Preset::Custom,
             lod_distance: 0,
             far_detail: FarDetail::Full,
@@ -432,7 +433,15 @@ impl Default for Graphics {
             battery: false,
             api: GraphicsApi::Auto,
             shader_pack: String::new(),
+        };
+        // A phone draws into a small, dense screen: three quarters of its native resolution
+        // looks nearly the same and costs far less fill rate, which is what overheats a phone.
+        #[cfg(target_os = "android")]
+        {
+            graphics.resolution_scale = 75;
+            graphics.entity_culling = true;
         }
+        graphics
     }
 }
 fn bool_text(v: bool) -> &'static str {

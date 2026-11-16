@@ -1,6 +1,6 @@
 [package]
 name = "morizen-android"
-version = "1.0.3"
+version = "1.0.4"
 edition.workspace = true
 license.workspace = true
 rust-version = "1.90"
@@ -20,6 +20,7 @@ java-mods = []
 horizon-client = { path = "../horizon-client", default-features = false, features = ["android-game", "touch-controls"] }
 horizon-prepare = { path = "../horizon-prepare" }
 horizon-protocol = { path = "../horizon-protocol" }
+horizon-theme = { path = "../horizon-theme" }
 bytemuck = { version = "1", features = ["derive"] }
 log = "0.4"
 pollster = "0.4"
@@ -33,6 +34,7 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
 android_logger = "0.15"
+jni = "0.21"
 
 [package.metadata.android]
 package = "com.morizen.app"
@@ -59,6 +61,10 @@ name = "android.permission.ACCESS_NETWORK_STATE"
 # 11+ hides those from ordinary apps; the player grants "All files access" in Settings once.
 [[package.metadata.android.uses_permission]]
 name = "android.permission.MANAGE_EXTERNAL_STORAGE"
+
+# Installing the launcher's own update: Android asks the player once to allow it.
+[[package.metadata.android.uses_permission]]
+name = "android.permission.REQUEST_INSTALL_PACKAGES"
 
 [[package.metadata.android.uses_feature]]
 name = "android.hardware.touchscreen"

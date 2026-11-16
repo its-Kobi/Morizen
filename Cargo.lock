@@ -2304,13 +2304,15 @@ dependencies = [
 
 [[package]]
 name = "morizen-android"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "android_logger",
  "bytemuck",
  "horizon-client",
  "horizon-prepare",
  "horizon-protocol",
+ "horizon-theme",
+ "jni 0.21.1",
  "log",
  "pollster",
  "serde",

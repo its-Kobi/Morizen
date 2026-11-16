@@ -7,10 +7,12 @@
 
 pub mod font8x8;
 pub mod gfx2d;
+pub mod install;
 pub mod manifest;
 pub mod sandbox;
 pub mod shell;
 pub mod tables;
+pub mod update;
 
 #[cfg(target_os = "android")]
 use winit::platform::android::activity::AndroidApp;

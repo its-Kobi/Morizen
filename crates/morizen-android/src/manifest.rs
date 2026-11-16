@@ -27,6 +27,8 @@ pub enum Phase {
     Client,
     AssetIndex,
     Assets,
+    /// The launcher's own update APK (not the game set-up).
+    Update,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

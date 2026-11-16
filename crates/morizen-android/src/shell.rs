@@ -8,7 +8,9 @@
 
 use crate::gfx2d::{Gfx, Painter, Rect};
 use crate::manifest::{self, Phase, Progress};
+use crate::{install, update};
 use horizon_client::touch::{Action, Layout};
+use horizon_theme::BLOCKS_DARK as BLOCKS;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, channel};
@@ -18,14 +20,41 @@ use winit::event::{Ime, TouchPhase, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::window::{Window, WindowId};
 
-const BACKGROUND: [f32; 4] = [0.043, 0.047, 0.063, 1.0];
-const PANEL: [f32; 4] = [0.086, 0.094, 0.121, 1.0];
-const LINE: [f32; 4] = [0.24, 0.26, 0.33, 1.0];
-const TEXT: [f32; 4] = [0.88, 0.90, 0.94, 1.0];
-const MUTED: [f32; 4] = [0.55, 0.58, 0.66, 1.0];
-const ACCENT: [f32; 4] = [0.83, 0.63, 0.30, 1.0];
-const BUTTON: [f32; 4] = [0.14, 0.16, 0.21, 1.0];
-const DISABLED: [f32; 4] = [0.10, 0.11, 0.14, 1.0];
+/// The launcher's colours come from the design tokens the desktop launcher and the website use,
+/// so the phone's screen and the computer's look like the same program.
+const BACKGROUND: [f32; 4] = rgb(BLOCKS.page, 1.0);
+/// The top bar.
+const SIDE: [f32; 4] = rgb(BLOCKS.side, 1.0);
+/// Panels, cards and rows.
+const PANEL: [f32; 4] = rgb(BLOCKS.panel, 1.0);
+const PANEL_RAISED: [f32; 4] = rgb(BLOCKS.raised, 1.0);
+/// The light top edge of a panel, and its dark bottom edge.
+const BEVEL: [f32; 4] = rgb(BLOCKS.bevel, 1.0);
+const LIP: [f32; 4] = rgb(BLOCKS.lip, 1.0);
+const OUTLINE: [f32; 4] = rgb(BLOCKS.outline, 1.0);
+const LINE: [f32; 4] = rgb(BLOCKS.outline, 1.0);
+const TEXT: [f32; 4] = rgb(BLOCKS.ink, 1.0);
+const MUTED: [f32; 4] = rgb(BLOCKS.muted, 1.0);
+const ACCENT: [f32; 4] = rgb(BLOCKS.accent, 1.0);
+const BUTTON: [f32; 4] = rgb(BLOCKS.button, 1.0);
+const BUTTON_BEVEL: [f32; 4] = rgb(BLOCKS.button_bevel, 1.0);
+const WELL: [f32; 4] = rgb(BLOCKS.well, 1.0);
+const DISABLED: [f32; 4] = rgb(BLOCKS.well, 1.0);
+/// The main action's face (Play, Set up, Install), its bevel and lip, and its label.
+const FACE: [f32; 4] = rgb(BLOCKS.face, 1.0);
+const FACE_BEVEL: [f32; 4] = rgb(BLOCKS.face_bevel, 1.0);
+const FACE_LIP: [f32; 4] = rgb(BLOCKS.face_lip, 1.0);
+const ON_FACE: [f32; 4] = rgb(BLOCKS.on_face, 1.0);
+
+/// A design token (`0xRRGGBB`) as a colour the painter takes.
+const fn rgb(hex: u32, alpha: f32) -> [f32; 4] {
+    [
+        ((hex >> 16) & 0xff) as f32 / 255.0,
+        ((hex >> 8) & 0xff) as f32 / 255.0,
+        (hex & 0xff) as f32 / 255.0,
+        alpha,
+    ]
+}
 
 const VERSION: &str = "26.3";
 
@@ -44,6 +73,8 @@ struct Paths {
     search: Vec<PathBuf>,
     /// The build's bundled tables (`tables.zip`), copied out of the app's assets at startup.
     tables: Option<PathBuf>,
+    /// This app's external files folder, where a downloaded update APK is kept.
+    external: Option<PathBuf>,
 }
 
 /// The file that makes a folder a prepared game root (`horizon-prepare`'s output).
@@ -73,6 +104,8 @@ enum Act {
     Reset,
     AddKey,
     RemoveKey,
+    /// Download the newer release, or open Android's installer once it is downloaded.
+    Update,
 }
 
 /// What the background thread is doing.
@@ -82,6 +115,8 @@ enum JobKind {
     Setup,
     /// The 360 MB of sound effects and music, after the game itself is installed.
     Sounds,
+    /// The launcher's own update APK.
+    Update,
 }
 
 enum Msg {
@@ -125,6 +160,14 @@ pub struct Shell {
     launch: bool,
     /// Whether the resumed handler already looked for a download left by an earlier launch.
     auto_started: bool,
+    /// The newer release GitHub reported, when there is one.
+    newer: Option<update::Release>,
+    /// The release check running on its own thread.
+    update_check: Option<Receiver<Result<Option<update::Release>, String>>>,
+    /// A downloaded update APK waiting for the player to confirm the install.
+    update_apk: Option<PathBuf>,
+    /// Whether the startup check has already started.
+    checked_update: bool,
 }
 
 impl Shell {
@@ -156,6 +199,10 @@ impl Shell {
             needs_redraw: true,
             launch: false,
             auto_started: false,
+            newer: None,
+            update_check: None,
+            update_apk: None,
+            checked_update: false,
         };
         shell.discover(false);
         shell
@@ -354,8 +401,12 @@ impl Shell {
                         match kind {
                             JobKind::Setup => "The set-up",
                             JobKind::Sounds => "The sound download",
+                            JobKind::Update => "The update download",
                         }
                     );
+                    if kind == JobKind::Update {
+                        self.update_apk = None;
+                    }
                     finished = true;
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => break,
@@ -481,10 +532,103 @@ impl Shell {
         );
     }
 
+    /// Asks GitHub for the newest release in the background, the way the desktop launcher does at
+    /// startup. A phone with no network is the normal case: a failure only clears the row.
+    fn check_update(&mut self) {
+        if self.update_check.is_some() || self.newer.is_some() {
+            return;
+        }
+        let (sender, receiver) = channel();
+        std::thread::spawn(move || {
+            let _ = sender.send(update::check());
+        });
+        self.update_check = Some(receiver);
+    }
+
+    /// Takes the release check's answer when its thread has one.
+    fn poll_update(&mut self) {
+        let Some(receiver) = self.update_check.take() else {
+            return;
+        };
+        match receiver.try_recv() {
+            Ok(Ok(release)) => {
+                if release.is_some() {
+                    self.newer = release;
+                    self.needs_redraw = true;
+                }
+            }
+            Ok(Err(error)) => log::info!("Morizen: no update check: {error}"),
+            Err(std::sync::mpsc::TryRecvError::Empty) => self.update_check = Some(receiver),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {}
+        }
+    }
+
+    /// Where a downloaded APK is kept: this app's external files folder, which the installer can
+    /// read without a content provider.
+    fn update_path(&self) -> Option<PathBuf> {
+        self.paths.external.as_ref().map(|dir| {
+            dir.join("updates")
+                .join(format!("morizen-{}.apk", update::VERSION))
+        })
+    }
+
+    /// The update row's tap: download the release, then open Android's installer for the APK.
+    fn update(&mut self) {
+        if self.job.is_some() {
+            return;
+        }
+        let Some(release) = self.newer.clone() else {
+            // Nothing known yet: this is the manual "check for updates" path.
+            self.status = "Checking GitHub for a newer Morizen…".to_owned();
+            self.needs_redraw = true;
+            self.check_update();
+            return;
+        };
+        if let Some(apk) = self.update_apk.clone().filter(|apk| apk.is_file()) {
+            match install::start(&apk) {
+                Ok(()) => {
+                    self.status =
+                        "Confirm the install in Android's dialog to finish updating.".to_owned();
+                }
+                Err(error) => self.status = format!("Could not open the installer: {error}"),
+            }
+            self.needs_redraw = true;
+            return;
+        }
+        let Some(to) = self.update_path() else {
+            self.status = "This device gave the app no folder for the update.".to_owned();
+            self.needs_redraw = true;
+            return;
+        };
+        let version = release.version.clone();
+        let to_thread = to.clone();
+        self.update_apk = Some(to);
+        self.start_job(
+            JobKind::Update,
+            format!("Downloading Morizen {version}…"),
+            Box::new(
+                move |stage: &dyn Fn(&str), progress: &(dyn Fn(Progress) + Sync)| {
+                    stage(&format!("Downloading Morizen {version}…"));
+                    update::download(&release, &to_thread, &|done, total| {
+                        progress(Progress {
+                            phase: Phase::Update,
+                            done: done as usize,
+                            total: total as usize,
+                        })
+                    })?;
+                    Ok(format!(
+                        "Morizen {version} is downloaded. Tap INSTALL UPDATE to finish."
+                    ))
+                },
+            ),
+        );
+    }
+
     fn activate(&mut self, act: Act) {
         match act {
             Act::Download => self.setup(),
             Act::Sounds => self.download_sounds(),
+            Act::Update => self.update(),
             Act::Controls => {
                 self.page = Page::Controls;
                 self.status.clear();
@@ -676,32 +820,117 @@ impl Shell {
         }
     }
 
+    /// A solid, bevel-topped button like the desktop launcher's: a light top edge, the face, the
+    /// label and a shadow line under it.
+    #[allow(clippy::too_many_arguments)]
+    fn face_button(
+        &mut self,
+        painter: &mut Painter,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        label: &str,
+        act: Act,
+        enabled: bool,
+    ) {
+        if enabled {
+            self.hits.push((Rect::new(x, y, w, h), act));
+        }
+        let (top, bottom) = if enabled {
+            (FACE_BEVEL, FACE_LIP)
+        } else {
+            (BUTTON_BEVEL, LIP)
+        };
+        painter.rect(x, y, w, h, if enabled { FACE } else { WELL });
+        painter.rect(x, y, w, 1.5 * painter.ui, top);
+        painter.rect(x, y + h - 1.5 * painter.ui, w, 1.5 * painter.ui, bottom);
+        let size = Painter::fitted(label, 3.4 * painter.ui, w - 8.0 * painter.ui);
+        let color = if enabled { ON_FACE } else { MUTED };
+        painter.text_centered(x + w / 2.0, y + (h - size) / 2.0, label, size, color);
+    }
+
+    /// A row of a stacked card: the label on the left, a note or version on the right.
+    fn paint_row(
+        &mut self,
+        painter: &mut Painter,
+        area: Rect,
+        label: &str,
+        note: &str,
+        act: Option<Act>,
+        accent: bool,
+    ) {
+        if let Some(act) = act {
+            self.hits.push((area, act));
+        }
+        painter.frame(area, PANEL_RAISED, OUTLINE);
+        painter.rect(area.x, area.y, 1.5 * painter.ui, area.h, LIP);
+        let size = Painter::fitted(label, 2.6 * painter.ui, area.w * 0.62);
+        painter.text(
+            area.x + 5.0 * painter.ui,
+            area.y + (area.h - size) / 2.0,
+            label,
+            size,
+            if accent { ACCENT } else { TEXT },
+        );
+        if !note.is_empty() {
+            let note_size = Painter::fitted(note, 2.4 * painter.ui, area.w * 0.34);
+            let width = Painter::text_width(note, note_size);
+            painter.text(
+                area.x + area.w - 5.0 * painter.ui - width,
+                area.y + (area.h - note_size) / 2.0,
+                note,
+                note_size,
+                MUTED,
+            );
+        }
+    }
+
     fn paint_home(&mut self, painter: &mut Painter) {
         let (w, h, ui) = (painter.width, painter.height, painter.ui);
-        painter.text_centered(w / 2.0, h * 0.04, "MORIZEN", 10.0 * ui, TEXT);
-        painter.text_centered(
-            w / 2.0,
-            h * 0.04 + 12.0 * ui,
-            "MINECRAFT 26.3 RUST EDITION",
-            2.4 * ui,
-            ACCENT,
+        // The top bar, as on the desktop launcher: the wordmark on the left, the build on the
+        // right, a rule under both.
+        let bar = 13.0 * ui;
+        painter.rect(0.0, 0.0, w, bar, SIDE);
+        painter.rect(0.0, bar - 1.5 * ui, w, 1.5 * ui, OUTLINE);
+        let title_size = Painter::fitted("MORIZEN", 4.2 * ui, w * 0.55);
+        painter.text(
+            5.0 * ui,
+            (bar - title_size) / 2.0,
+            "MORIZEN",
+            title_size,
+            TEXT,
         );
-        let top = (h * 0.19).max(h * 0.04 + 21.0 * ui);
-        let panel = Rect::new(w * 0.05, top, w * 0.90, h * 0.30);
-        painter.frame(panel, PANEL, LINE);
-        let size = 2.4 * ui;
-        let mut y = panel.y + 4.0 * ui;
-        for line in Painter::wrap(&self.status, size, panel.w - 8.0 * ui)
+        let version = format!("v{}", update::VERSION);
+        let version_size = 2.4 * ui;
+        let version_width = Painter::text_width(&version, version_size);
+        painter.text(
+            w - 5.0 * ui - version_width,
+            (bar - version_size) / 2.0,
+            &version,
+            version_size,
+            MUTED,
+        );
+
+        // The status card: what the app is doing, and a progress bar when it knows the size.
+        let card_top = bar + 4.0 * ui;
+        let card = Rect::new(w * 0.05, card_top, w * 0.90, (h * 0.26).max(26.0 * ui));
+        painter.rect(card.x, card.y + card.h, card.w, 1.5 * ui, LIP);
+        painter.frame(card, PANEL, OUTLINE);
+        painter.rect(card.x, card.y, card.w, 1.5 * ui, BEVEL);
+        let size = 2.5 * ui;
+        let mut y = card.y + 5.0 * ui;
+        for line in Painter::wrap(&self.status, size, card.w - 10.0 * ui)
             .into_iter()
             .take(6)
         {
-            painter.text(panel.x + 4.0 * ui, y, &line, size, TEXT);
-            y += size * 1.4;
+            painter.text(card.x + 5.0 * ui, y, &line, size, TEXT);
+            y += size * 1.5;
         }
         if let Some(progress) = &self.progress {
             y += 2.0 * ui;
-            let bar = Rect::new(panel.x + 4.0 * ui, y, panel.w - 8.0 * ui, 3.0 * ui);
-            painter.frame(bar, BACKGROUND, LINE);
+            let bar_area = Rect::new(card.x + 5.0 * ui, y, card.w - 10.0 * ui, 3.0 * ui);
+            painter.frame(bar_area, BACKGROUND, OUTLINE);
             if progress.phase == Phase::Client {
                 // One large file: show a block moving along the bar so a long download on a
                 // phone clearly still works.
@@ -709,12 +938,12 @@ impl Shell {
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|elapsed| (elapsed.as_millis() % 1500) as f32 / 1500.0)
                     .unwrap_or(0.0);
-                let width = (bar.w - 2.0) * 0.25;
+                let width = (bar_area.w - 2.0) * 0.25;
                 painter.rect(
-                    bar.x + 1.0 + (bar.w - 2.0 - width) * t,
-                    bar.y + 1.0,
+                    bar_area.x + 1.0 + (bar_area.w - 2.0 - width) * t,
+                    bar_area.y + 1.0,
                     width,
-                    bar.h - 2.0,
+                    bar_area.h - 2.0,
                     ACCENT,
                 );
             } else {
@@ -724,10 +953,10 @@ impl Shell {
                     (progress.done as f32 / progress.total as f32).clamp(0.0, 1.0)
                 };
                 painter.rect(
-                    bar.x + 1.0,
-                    bar.y + 1.0,
-                    (bar.w - 2.0) * fraction,
-                    bar.h - 2.0,
+                    bar_area.x + 1.0,
+                    bar_area.y + 1.0,
+                    (bar_area.w - 2.0) * fraction,
+                    bar_area.h - 2.0,
                     ACCENT,
                 );
             }
@@ -738,58 +967,115 @@ impl Shell {
                 Phase::Manifest => "VERSION MANIFEST".to_owned(),
                 Phase::Version => "VERSION FILE".to_owned(),
                 Phase::AssetIndex => "ASSET INDEX".to_owned(),
+                Phase::Update => {
+                    let mb = progress.total.max(1) as f32 / (1024.0 * 1024.0);
+                    format!(
+                        "UPDATE {:.1} OF {:.1} MB",
+                        progress.done as f32 / (1024.0 * 1024.0),
+                        mb
+                    )
+                }
             };
-            painter.text(panel.x + 4.0 * ui, y, &label, 2.2 * ui, MUTED);
+            painter.text(card.x + 5.0 * ui, y, &label, 2.2 * ui, MUTED);
         }
 
-        let bw = w * 0.66;
-        let bh = 9.0 * ui;
+        let bw = w * 0.78;
+        let bh = 10.0 * ui;
         let bx = (w - bw) / 2.0;
-        let mut y = h * 0.55;
         let gap = 2.5 * ui;
+        let mut y = (card.y + card.h + 6.0 * ui).max(h * 0.53);
         let working = self.job.is_some() || self.search.is_some();
         let prepared = Self::is_prepared(&self.paths.prepared);
-        let (label, act, enabled) = if !prepared {
-            (
-                "DOWNLOAD & SET UP",
-                Act::Download,
-                self.paths.tables.is_some(),
-            )
-        } else if !Self::has_sounds(&self.paths.prepared) {
-            ("DOWNLOAD SOUNDS", Act::Sounds, true)
-        } else {
-            ("SET-UP COMPLETE", Act::Download, false)
-        };
-        self.button(painter, bx, y, bw, bh, label, act, enabled && !working);
-        y += bh + gap;
-        self.button(
-            painter,
-            bx,
-            y,
-            bw,
-            bh,
-            "TOUCH CONTROLS",
-            Act::Controls,
-            !working,
-        );
-        y += bh + gap;
+
+        // The main action, on the gold face: Play once the game is there, the set-up before.
         if prepared {
-            self.button(painter, bx, y, bw, bh, "PLAY", Act::Play, true);
+            self.face_button(painter, bx, y, bw, bh, "PLAY", Act::Play, !working);
         } else {
-            self.button(
+            self.face_button(
                 painter,
                 bx,
                 y,
                 bw,
                 bh,
-                "SEARCH DEVICE FOR 26.3",
-                Act::Search,
-                !working,
+                "DOWNLOAD & SET UP",
+                Act::Download,
+                self.paths.tables.is_some() && !working,
             );
         }
         y += bh + gap;
-        let name = format!("PLAYER: {}", self.name.to_ascii_uppercase());
-        self.button(painter, bx, y, bw, 7.0 * ui, &name, Act::Name, !working);
+
+        // The secondary actions, as rows of one card.
+        let row = 8.5 * ui;
+        let rows = if prepared {
+            2 + usize::from(!Self::has_sounds(&self.paths.prepared))
+        } else {
+            2
+        };
+        let card = Rect::new(bx, y, bw, row * rows as f32);
+        painter.frame(card, PANEL, OUTLINE);
+        let mut ry = y;
+        if prepared && !Self::has_sounds(&self.paths.prepared) {
+            self.paint_row(
+                painter,
+                Rect::new(bx, ry, bw, row),
+                "DOWNLOAD SOUNDS",
+                "360 MB",
+                Some(Act::Sounds).filter(|_| !working),
+                false,
+            );
+            ry += row;
+        }
+        self.paint_row(
+            painter,
+            Rect::new(bx, ry, bw, row),
+            "TOUCH CONTROLS",
+            "",
+            Some(Act::Controls).filter(|_| !working),
+            false,
+        );
+        ry += row;
+        if prepared {
+            let name = self.name.to_ascii_uppercase();
+            self.paint_row(
+                painter,
+                Rect::new(bx, ry, bw, row),
+                "PLAYER NAME",
+                &name,
+                Some(Act::Name).filter(|_| !working),
+                false,
+            );
+        } else {
+            self.paint_row(
+                painter,
+                Rect::new(bx, ry, bw, row),
+                "SEARCH DEVICE",
+                "26.3",
+                Some(Act::Search).filter(|_| !working),
+                false,
+            );
+        }
+        y += card.h + gap;
+
+        // The update row: only when GitHub has something newer, and always tappable to finish an
+        // already-downloaded release.
+        if let Some(release) = &self.newer {
+            let ready = self.update_apk.as_ref().is_some_and(|apk| apk.is_file());
+            let (label, note) = if ready {
+                ("INSTALL UPDATE", release.version.clone())
+            } else if self.job.is_some() {
+                ("DOWNLOADING UPDATE", release.version.clone())
+            } else {
+                ("UPDATE AVAILABLE", release.version.clone())
+            };
+            self.paint_row(
+                painter,
+                Rect::new(bx, y, bw, 9.0 * ui),
+                label,
+                &note,
+                Some(Act::Update).filter(|_| !working),
+                true,
+            );
+        }
     }
 
     fn paint_controls(&mut self, painter: &mut Painter) {
@@ -1042,12 +1328,22 @@ impl ApplicationHandler for Shell {
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         self.poll_job();
         self.poll_search();
+        self.poll_update();
+        if !self.checked_update {
+            self.checked_update = true;
+            self.check_update();
+        }
         if self.job.is_some() {
             // The moving block on a single large download needs frames to move.
             self.needs_redraw = true;
         }
         event_loop.set_control_flow(if self.job.is_some() || self.search.is_some() {
             ControlFlow::Poll
+        } else if self.update_check.is_some() {
+            // A short, cheap wait: the release check's thread has no way to wake this loop.
+            ControlFlow::WaitUntil(
+                std::time::Instant::now() + std::time::Duration::from_millis(250),
+            )
         } else {
             ControlFlow::Wait
         });
@@ -1238,6 +1534,7 @@ pub fn run(app: winit::platform::android::activity::AndroidApp) -> Result<(), St
         imported,
         search,
         tables: bundled_tables(&app, &data),
+        external: external.clone(),
     };
     for folder in [
         Some(&paths.game),
@@ -1250,6 +1547,7 @@ pub fn run(app: winit::platform::android::activity::AndroidApp) -> Result<(), St
         std::fs::create_dir_all(folder).map_err(|e| format!("{}: {e}", folder.display()))?;
     }
     std::env::set_current_dir(&paths.game).map_err(|e| format!("{}: {e}", paths.game.display()))?;
+    install::remember(&app);
     let mut stage = Stage::Shell(Shell::new(paths));
     let event_loop = winit::event_loop::EventLoop::builder()
         .with_android_app(app)
@@ -1288,6 +1586,7 @@ mod tests {
             imported: None,
             search: vec![dir.join("Download")],
             tables: None,
+            external: None,
         };
         let shell = Shell::new(paths);
         assert_eq!(shell.paths.prepared, root);
@@ -1306,6 +1605,7 @@ mod tests {
             imported: None,
             search: vec![dir.join("Download")],
             tables: Some(dir.join("tables.zip")),
+            external: None,
         };
         let mut shell = Shell::new(paths);
         let (sender, receiver) = channel();

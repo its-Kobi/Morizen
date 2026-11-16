@@ -263,8 +263,38 @@ static TABLE: LazyLock<Vec<Def>> = LazyLock::new(|| {
     for part in MODEL_PARTS {
         t.push(pb(&format!("modelPart_{part}"), true));
     }
+    #[cfg(target_os = "android")]
+    mobile_preset(&mut t);
     t
 });
+
+/// The first launch on a phone or tablet: a smaller world, fast graphics, no shadows, clouds or
+/// particle spam, and a 60 fps cap. A phone's GPU is small and has little thermal headroom, and
+/// the desktop defaults (12 chunks, fancy graphics, shadows) run at a handful of frames there.
+/// `options.txt` keeps whatever the player changes in Options afterwards, so this is only the
+/// starting point, never a lock.
+#[cfg(target_os = "android")]
+fn mobile_preset(table: &mut [Def]) {
+    let mut set = |key: &str, value: V| {
+        if let Some(entry) = table.iter_mut().find(|entry| entry.key == key) {
+            entry.default = value;
+        }
+    };
+    set("renderDistance", V::Int(4));
+    set("simulationDistance", V::Int(5));
+    // Fast: no smooth lighting, no fancy leaves, no entity shadows.
+    set("graphicsPreset", V::Int(0));
+    set("renderClouds", V::Int(0));
+    set("cloudRange", V::Int(32));
+    set("entityShadows", V::Bool(false));
+    // Minimal particles.
+    set("particles", V::Int(2));
+    set("biomeBlendRadius", V::Int(0));
+    set("mipmapLevels", V::Int(2));
+    set("maxFps", V::Int(60));
+    set("weatherRadius", V::Int(5));
+    set("entityDistanceScaling", V::Double(0.5));
+}
 
 /// Mth.floor for doubles.
 fn floor_int(v: f64) -> i32 {
