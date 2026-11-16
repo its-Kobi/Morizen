@@ -985,6 +985,7 @@ impl Shell {
         let gap = 2.5 * ui;
         let mut y = (card.y + card.h + 6.0 * ui).max(h * 0.53);
         let working = self.job.is_some() || self.search.is_some();
+        let tap = |act: Act| if working { None } else { Some(act) };
         let prepared = Self::is_prepared(&self.paths.prepared);
 
         // The main action, on the gold face: Play once the game is there, the set-up before.
@@ -1020,7 +1021,7 @@ impl Shell {
                 Rect::new(bx, ry, bw, row),
                 "DOWNLOAD SOUNDS",
                 "360 MB",
-                Some(Act::Sounds).filter(|_| !working),
+                tap(Act::Sounds),
                 false,
             );
             ry += row;
@@ -1030,7 +1031,7 @@ impl Shell {
             Rect::new(bx, ry, bw, row),
             "TOUCH CONTROLS",
             "",
-            Some(Act::Controls).filter(|_| !working),
+            tap(Act::Controls),
             false,
         );
         ry += row;
@@ -1041,7 +1042,7 @@ impl Shell {
                 Rect::new(bx, ry, bw, row),
                 "PLAYER NAME",
                 &name,
-                Some(Act::Name).filter(|_| !working),
+                tap(Act::Name),
                 false,
             );
         } else {
@@ -1050,7 +1051,7 @@ impl Shell {
                 Rect::new(bx, ry, bw, row),
                 "SEARCH DEVICE",
                 "26.3",
-                Some(Act::Search).filter(|_| !working),
+                tap(Act::Search),
                 false,
             );
         }
@@ -1072,7 +1073,7 @@ impl Shell {
                 Rect::new(bx, y, bw, 9.0 * ui),
                 label,
                 &note,
-                Some(Act::Update).filter(|_| !working),
+                tap(Act::Update),
                 true,
             );
         }
@@ -1634,6 +1635,7 @@ mod tests {
             imported: Some(dir.join("external").join(VERSION)),
             search: Vec::new(),
             tables: Some(dir.join("tables.zip")),
+            external: None,
         };
         let shell = Shell::new(paths);
         assert_eq!(shell.paths.prepared, prepared);
