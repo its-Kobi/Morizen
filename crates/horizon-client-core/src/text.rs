@@ -166,6 +166,21 @@ impl Text {
             }],
         }
     }
+    /// `literal` without the JSON form: the HUD builds one of these per line
+    /// per frame, and the `serde_json` map is most of that cost.
+    pub fn plain_line(s: impl Into<String>) -> Self {
+        let text = s.into();
+        if text.is_empty() {
+            return Self::default();
+        }
+        Self {
+            source: None,
+            spans: vec![Span {
+                text,
+                style: Style::default(),
+            }],
+        }
+    }
     pub fn styled(s: impl Into<String>, style: Style) -> Self {
         Self::literal(s).with_style(&style)
     }
@@ -671,6 +686,29 @@ pub fn format_translation(template: &str, args: &[Text]) -> Text {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// The HUD builds a text per line per frame; `plain` skips the JSON map,
+    /// which is what that loop spends its time on. Prints the numbers CI logs.
+    #[test]
+    fn plain_line_builds_the_same_text_far_cheaper_than_literal() {
+        const N: u32 = 5_000;
+        let start = std::time::Instant::now();
+        for i in 0..N {
+            std::hint::black_box(Text::literal(format!("line {i}")));
+        }
+        let literal = start.elapsed();
+        let start = std::time::Instant::now();
+        for i in 0..N {
+            std::hint::black_box(Text::plain_line(format!("line {i}")));
+        }
+        let plain = start.elapsed();
+        eprintln!("text build x{N}: literal {literal:?}, plain {plain:?}");
+        assert_eq!(Text::plain_line("a").spans, Text::literal("a").spans);
+        assert_eq!(Text::plain_line("a").component(), Text::literal("a").component());
+        assert!(
+            plain * 2 < literal,
+            "plain {plain:?} is not 2x faster than literal {literal:?}"
+        );
+    }
     #[test]
     fn click_events_serialize_and_inherit_as_one_style_field() {
         for (event, json) in [

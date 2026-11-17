@@ -371,7 +371,7 @@ impl Game<'_> {
         let [x, y] = at;
         let [_, r, g, b] = rgb.to_be_bytes();
         let color = rgba(r, g, b, 0xFF);
-        batch.text_styled(&self.gui.atlas, &Text::literal(text), x, y, color, shadow);
+        batch.text_styled(&self.gui.atlas, &Text::plain_line(text), x, y, color, shadow);
     }
     /// The player, in a world.
     pub(super) fn native_player(&self) -> Option<NativePlayer> {

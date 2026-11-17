@@ -935,6 +935,11 @@ impl HudBatch {
         }
     }
     pub fn fill(&mut self, atlas: &HudAtlas, x: f32, y: f32, w: f32, h: f32, color: u32) {
+        // A zero-sized or fully transparent box draws nothing; skipping it
+        // keeps it out of the vertex buffer and the GPU's work.
+        if !(w > 0.0 && h > 0.0) || color >> 24 == 0 {
+            return;
+        }
         let mut r = atlas.white;
         let (cu, cv) = ((r.u0 + r.u1) / 2.0, (r.v0 + r.v1) / 2.0);
         r.u0 = cu;

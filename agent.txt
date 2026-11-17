@@ -5,7 +5,7 @@ repository** at `C:\Users\Brothers\Desktop\Morizen` (GitHub
 `its-Kobi/Morizen`, branch `main`). The mods repository has its own
 `agent.txt` (`C:\Users\Brothers\Desktop\Morizen Mods\agent.txt`).
 
-Last updated: 2026-11-17 (native-mod tooling fix: the Android library `game` module no longer hides the binary's `game` module from horizon-mixins).
+Last updated: 2026-11-17 (native mods: Morinume 0.2.0 pin moves here; HUD text fast path and `HudBatch::fill` culling added for its FPS work).
 
 ---
 
@@ -122,11 +122,22 @@ what a native mod can do; they are listed in `list_native_mods`.
 
 Lives in `C:\Users\Brothers\Desktop\Morizen Mods` (GitHub
 `its-Kobi/Morizen-Mods`), built by that repo's Actions, never here. It started
-as a WebAssembly mod (release `v0.1.0`, dead format) and is being rebuilt as a
-**native mixin bundle** that hooks `native_hud`/`native_key`/`native_command`/
+as a WebAssembly mod (release `v0.1.0`, dead format) and is now a **native mixin
+bundle** (version 0.2.0) that hooks `native_hud`/`native_key`/`native_command`/
 `native_mods`/`native_settings`/`native_settings_click`. The mod repo's
 `agent.txt` has the full story and the current state; read it before touching
 anything mod-related here.
+
+The 0.2.0 pin includes two engine-side changes made for it, both host-tested:
+
+- `Text::plain_line` (`crates/horizon-client-core/src/text.rs`): a text without
+  the serde_json map, used by `native_text`; the test prints `literal` vs
+  `plain` timings (23.4 ms -> 3.1 ms per 5000 lines, debug).
+- `HudBatch::fill` (`crates/horizon-client-render/src/hud.rs`) drops zero-size
+  and fully transparent boxes instead of pushing six vertices each.
+
+Do not "clean these up": the mod pins this commit and its menu calls them every
+frame.
 
 ## 7. Working rules for agents on this repo
 
