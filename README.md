@@ -14,15 +14,35 @@ more than 300 differential harnesses. Morizen keeps that engine and gives it its
 
 - **The launcher.** Its name, window title, text in every language, desktop entry and shortcuts say
   Morizen, and **Settings › About** has a **Fork** row that names the project it comes from.
-- **Offine** Supporting Offline Mode Accounts.
-- **Mobile** A New Version that Support Mobile too!
+- **Offline mode.** Morizen can play with an offline account, without signing in to Microsoft.
+- **Android.** The launcher and the game build for Android, with a touch layout and a first-launch
+  preset (reduced resolution, lower render distance) so a phone starts playable.
+- **Updates.** The launcher checks the newest Morizen release, downloads it and installs it, on
+  desktop and on Android.
 - **The look.** The Blocks palette — the colours of the launcher and the project site — is warm neutrals
   with a gold accent instead of Horizon's cool violet. The game's own menus keep the neutral palette they
   had.
 - **The accent picker** follows the new face: gold carries dark text, so the fitter lightens it instead of
   darkening it, and every pair still clears WCAG AA.
 
-The game, the dedicated server and the mod loader are Horizon's work, unchanged.
+The game, the dedicated server and the engine are Horizon's work, unchanged.
+
+## Mods
+
+Morizen follows Horizon's move away from WebAssembly code mods:
+
+- **Content mods** (`.hmod` with data or assets, no code) still load with the resources.
+- **Native mods** are mixin bundles: `horizon-mixin.toml` and helper `.rs` files that patch the game's
+  source before it is compiled, built by the launcher (Settings › Game › Native mods, experimental) or by
+  CI. They are native code with the player's rights and only run in a build made for the instance they
+  are installed in. Hook points and the format: [docs/native-mods.md](docs/native-mods.md).
+- A WebAssembly code mod that a player still has installed shows as
+  `ON (Stopped) — needs a native port`; it does not run.
+
+**Morinume** is Morizen's own mods menu, a native mod in development at
+[`its-Kobi/Morizen-Mods`](https://github.com/its-Kobi/Morizen-Mods): one grid of cards for every mod,
+its options and its on/off switch, per profile. Its notes for contributors and agents are in that
+repository's `agent.txt`.
 
 ## Project status
 
@@ -36,6 +56,8 @@ Morizen itself is a **development build**, not a distribution:
 - Game releases and launcher updates come only from `its-Kobi/Morizen`, so neither an upstream
   Horizon game build nor its launcher can replace a Morizen install. Mojang's Minecraft version
   list is unchanged; the mod registry still comes from `horizon-rust/horizon`.
+- Native mods and Morinume are new and experimental: the hook points are stable, the menu is still
+  being built.
 - Some internal package names and file paths still use `horizon` for compatibility.
 - Some docs still describe Horizon, and the game's own screens still say "Horizon Settings".
 
@@ -73,9 +95,11 @@ cd launcher && cargo run --release
 ## Where to look
 
 - [launcher/README.md](launcher/README.md) — everything the launcher does, with its command line.
-- [AGENTS.md](AGENTS.md) — the map of the code, crate by crate.
+- [docs/native-mods.md](docs/native-mods.md) — native mods: hook points, bundles, what the launcher builds.
+- [AGENTS.md](AGENTS.md) — the map of the code, crate by crate (and `agent.txt` for a shorter version).
 - [docs/README.md](docs/README.md) — the developer documentation's index.
 - [CONTRIBUTING.md](CONTRIBUTING.md) — how changes are made and checked.
+- [`its-Kobi/Morizen-Mods`](https://github.com/its-Kobi/Morizen-Mods) — Morizen's own mods, Morinume first.
 
 ## Licence and credits
 

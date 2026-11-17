@@ -5,7 +5,7 @@ repository** at `C:\Users\Brothers\Desktop\Morizen` (GitHub
 `its-Kobi/Morizen`, branch `main`). The mods repository has its own
 `agent.txt` (`C:\Users\Brothers\Desktop\Morizen Mods\agent.txt`).
 
-Last updated: 2026-11-17.
+Last updated: 2026-11-17 (README rewritten for offline mode, Android, updates, native mods and Morinume).
 
 ---
 
