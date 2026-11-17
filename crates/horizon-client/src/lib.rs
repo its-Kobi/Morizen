@@ -9,8 +9,19 @@ pub mod advancements;
 pub mod ambience;
 pub mod animate_tick;
 pub mod arrows;
+// Android builds compile the game's `game.rs` into the library. The module is
+// declared through a macro so native-mixin tooling, which indexes modules
+// statically, does not see two modules named `game` (the binary declares the
+// other one) and reject every hook on it as being under a `cfg`. Android code
+// still reaches it as `horizon_client::game`.
 #[cfg(feature = "android-game")]
-pub mod game;
+macro_rules! android_game_module {
+    () => {
+        pub mod game;
+    };
+}
+#[cfg(feature = "android-game")]
+android_game_module!();
 pub use horizon_client_render::{
     assets, atlas_sources, audio, auth, bidi, biome, block_entities, block_entity_anim,
     block_entity_render, border_render, breaking, brewing, camera, chat, chunk, chunk_map, clouds,
