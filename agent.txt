@@ -1,0 +1,140 @@
+# AGENT NOTES — Morizen (the game)
+
+For an AI agent with no prior context. This file describes the **game
+repository** at `C:\Users\Brothers\Desktop\Morizen` (GitHub
+`its-Kobi/Morizen`, branch `main`). The mods repository has its own
+`agent.txt` (`C:\Users\Brothers\Desktop\Morizen Mods\agent.txt`).
+
+Last updated: 2026-11-17.
+
+---
+
+## 1. What Morizen is
+
+Morizen is a fork of [Horizon](https://github.com/horizon-rust/horizon): a
+clean-room Rust + wgpu reimplementation of **Minecraft: Java Edition 26.3**
+(network protocol 777, vanilla worldgen, redstone, mobs, saves, LAN and a
+dedicated server). Almost all engine work and docs are upstream Horizon's; the
+fork's own changes are the launcher skin, design tokens, the Android build,
+auto-updates and the phone performance preset.
+
+- Repo: `https://github.com/its-Kobi/Morizen` (public), branch `main`.
+- Read once: `CONTRIBUTING.md`, `AGENTS.md` (rules that bite),
+  `docs/architecture.md` (feature → files → harness), `docs/parity-workflow.md`.
+- Everything players run is **Rust**. Python/Java only for dev tools and
+  harness drivers under `tools/` and `mods/`.
+- Never commit Mojang's files (jars, assets, decompiled source, prepared
+  `.local/` resources). `tools/check_public_tree.py` enforces it;
+  `git config core.hooksPath .githooks` runs it on commit.
+- Vanilla is the specification. Use `horizon_core::jmath` for vanilla `Math`
+  and `horizon_core::random` for RNG (draw order matters); start parity work
+  from `python3 tools/port_ledger.py` instead of grepping.
+
+## 2. Crates you will actually touch
+
+Game workspace (root `Cargo.toml`); `launcher/` and
+`crates/horizon-telemetry-server` are separate workspaces.
+
+| Crate | Owns |
+|---|---|
+| `horizon-client` | The game: lib (`src/lib.rs`, flat modules) + bin (`src/main.rs` → `game.rs`, `game/`), `horizon-ctl`, the dedicated server |
+| `horizon-client-render` | World data, rendering, HUD, menus, settings (~80 modules re-exported by `horizon-client`) |
+| `horizon-client-core` | `text.rs`, `lang.rs`, `snbt.rs`, components, scoreboard, registries |
+| `horizon-client-input` | Keybinds, mouse, gamepad, window options, clipboard |
+| `horizon-world` | NBT, regions, chunks, worldgen, block behaviour, entity physics, damage |
+| `horizon-core` | Java RNG, `jmath`, positions, noise, palettes |
+| `horizon-protocol` | Protocol 777 codecs and packets |
+| `horizon-mods` | Mod packages (manifest, index, content) — **not** a WASM runtime for code mods any more |
+| `horizon-mod-sdk`, `cargo-horizon-mod`, `horizon-mixins`-facing code | Old WebAssembly tooling and native hook points |
+| `horizon-theme` | Design tokens (`BLOCKS_DARK`) for launcher, menus, website |
+| `launcher/` | GPUI launcher: `main.rs` (UI), `backend.rs` (installs, updates), `*_page.rs`, `native_mods.rs`, `native_build` |
+| `crates/morizen-android` | Android launcher + update check/download/install (`update.rs`, `install.rs`) |
+
+`game.rs` holds `struct Game` (~290 fields) and the core loop; features live in
+`game/<feature>.rs` as `impl Game<'_>` blocks. Two single-player paths exist:
+the **server thread** (default; what players run) and the deprecated in-frame
+path (`--in-frame`, `--no-server-thread`) which must not get new features.
+`remote`, `lan`, `integrated`, `serving`, `options.dedicated` say which mode a
+`Game` is in.
+
+## 3. Build, test, run
+
+```sh
+cargo build --profile fast -p horizon-client     # quick optimized build
+cargo test -p horizon-client --lib --bins --tests
+python3 tools/pr_ready.py                        # fmt, clippy, tests, harnesses
+python3 tools/parity.py --changed origin/main     # harnesses a branch can affect
+cargo run --profile fast -p horizon-client -- --resources .local/horizon-client/26.3 --world T
+```
+
+- The game and harnesses need vanilla data in `.local/` (`minecraft/`,
+  `horizon-client/26.3`, `datagen/`) prepared by `horizon-prepare` from the
+  player's own install. Without it, `pr_ready.py` only lists the harnesses.
+- On this Windows machine (`x86_64-pc-windows-gnu`, no Visual Studio) the game
+  **does not link locally**: `crates/horizon-client/build.rs` panics on the
+  missing icon tooling. For a local `cargo check`/`test`, temporarily turn that
+  panic into an `eprintln!` and revert afterwards. Real builds happen in
+  GitHub Actions.
+- Keep test runs away from player data: fresh `mktemp -d` for `HORIZON_HOME`,
+  `HORIZON_LAUNCHER_HOME`, `XDG_DATA_HOME`/`XDG_CONFIG_HOME`, plus
+  `HORIZON_NO_AUDIO=1`, and never write to `~/.local/share/{applications,horizon,horizon-launcher}`.
+
+## 4. Mods: the fact that keeps biting
+
+There are three kinds of mod content:
+
+1. **Content mods** (`.hmod` with `data/`/`assets/`, no `mod.wasm`): still
+   loaded with the resources (`content_root` in `game/mods.rs`).
+2. **WebAssembly code mods**: **no longer run**. Any package with a
+   `mod.wasm` is listed on Options > Mods as
+   `ON (Stopped) — "Doesn't run any more: needs a native port"`
+   (`game/mods.rs`). The SDK and `cargo horizon-mod` still exist in-tree, which
+   is misleading; do not build new WASM mods.
+3. **Native mods**: mixin bundles (`horizon-mixin.toml` + helper `.rs`) that
+   patch the game's Rust source before compiling, built by the launcher
+   (`horizon-launcher native-build --trust-native-code`) or CI. The stable
+   surface is `crates/horizon-client/src/game/native_hooks.rs`
+   (`NATIVE_HOOKS_API = 2`): `native_frame`, `native_tick`, `native_hud`,
+   `native_key`, `native_wheel`, `native_command`, `native_zoom`,
+   `native_minimap`, `native_mods`, `native_settings`,
+   `native_settings_click`, `native_panel_event`, plus helpers
+   (`native_fill`, `native_text`, `native_player`, `native_setting`,
+   `native_mods` list, recipes/panel API…). Native mods read/write settings in
+   `horizon-mods/.horizon-mod-data/<id>/`, the path WebAssembly mods used.
+   Details: `docs/native-mods.md`.
+
+Horizon's own extras (Zoom, minimap, HUD panels, recipes) are the reference for
+what a native mod can do; they are listed in `list_native_mods`.
+
+## 5. Morizen-specific decisions already shipped
+
+- **v1.0.4**: Android launcher restyled with `horizon_theme::BLOCKS_DARK`,
+  automatic update check/download/install in `crates/morizen-android`, Android
+  first-launch preset (`mobile_preset`, graphics resolution scale 75 on
+  Android). The update checker scans `releases?per_page=30` (GitHub's `latest`
+  points at the launcher's `release-launcher` tag, not the game releases).
+- Releases are cut from GitHub Actions (APK, Windows zip, Linux tar.gz,
+  `SHA256SUMS` + `.sig`); merges ship in batches per `docs/release-flow.md`.
+- Agents: mark PRs/issues/comments as the AGENTS.md rules say, end commits with
+  `Co-Authored-By:` for the agent, and never add the `release-now` label.
+
+## 6. Morinume (the official mods menu)
+
+Lives in `C:\Users\Brothers\Desktop\Morizen Mods` (GitHub
+`its-Kobi/Morizen-Mods`), built by that repo's Actions, never here. It started
+as a WebAssembly mod (release `v0.1.0`, dead format) and is being rebuilt as a
+**native mixin bundle** that hooks `native_hud`/`native_key`/`native_command`/
+`native_mods`/`native_settings`/`native_settings_click`. The mod repo's
+`agent.txt` has the full story and the current state; read it before touching
+anything mod-related here.
+
+## 7. Working rules for agents on this repo
+
+- Reply in the language the owner used; report in ≤5 lines per task.
+- Do not build on the owner's device. Push branches and let CI build. If you
+  must compile locally, delete `target/` and generated lockfiles afterwards.
+- Small PRs (< ~500 lines); no per-feature rewrites of `game.rs`.
+- Check for an existing contributor's PR before starting an area:
+  `gh pr list --state open --search <area>` (the API works too; `gh` may not be
+  installed).
+- Never enable `release-now`; never commit Mojang files.
